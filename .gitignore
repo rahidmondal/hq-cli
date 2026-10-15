@@ -1,0 +1,6 @@
+specs/
+plans/
+__pycache__/
+*.pyc
+.worktrees/
+.superpowers/

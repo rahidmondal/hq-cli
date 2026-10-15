@@ -1,0 +1,152 @@
+import argparse
+import json
+import os
+import sys
+
+import hq_core
+from hq_core import HqError
+
+
+def cmd_save(args):
+    tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
+    path = hq_core.save(args.kind, args.title, project_override=args.project, tags=tags)
+    print(path)
+
+
+def cmd_start(args):
+    path = hq_core.start(args.slug, project_override=args.project)
+    print(path)
+
+
+def cmd_archive(args):
+    path = hq_core.archive(args.slug, project_override=args.project)
+    print(path)
+
+
+def format_table(entries):
+    if not entries:
+        return "(no entries)"
+    header = ("PROJECT", "STATUS", "KIND", "SLUG", "TITLE")
+    rows = [header] + [
+        (e["project"] or "-", e["status"] or "-", e["kind"], e["slug"], e["title"])
+        for e in entries
+    ]
+    widths = [max(len(row[i]) for row in rows) for i in range(len(header))]
+    return "\n".join(
+        "  ".join(row[i].ljust(widths[i]) for i in range(len(header)))
+        for row in rows
+    )
+
+
+def cmd_list(args):
+    entries = hq_core.list_entries(project=args.project, status=args.status)
+    if args.json:
+        for e in entries:
+            print(json.dumps({**e, "path": str(e["path"])}))
+        return
+    print(format_table(entries))
+
+
+def cmd_find(args):
+    results = hq_core.search_entries(args.query)
+    if args.json:
+        for r in results:
+            print(json.dumps({**r, "path": str(r["path"])}))
+        return
+    if not results:
+        print("no matches")
+        return
+    for r in results:
+        project = r["project"] or "-"
+        status = r["status"] or "-"
+        print(f"{project}/{status}/{r['slug']}  ({r['title']})  {r['path']}")
+
+
+def cmd_log(args):
+    entries = hq_core.read_log(project=args.project, since=args.since)
+    for entry in entries:
+        print(json.dumps(entry))
+
+
+def cmd_init(args):
+    import hq_init
+
+    print("\n".join(hq_init.init(args.root, args.install_skill)))
+
+
+def cmd_serve(args):
+    import hq_serve
+
+    if not hq_core.HQ_ROOT.is_dir():
+        raise HqError(f"{hq_core.HQ_ROOT} does not exist. Run `hq init` first.")
+    hq_serve.serve(args.port, open_browser=not args.no_open)
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="hq")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_init = sub.add_parser("init", help="first-time setup: create the data folder and check PATH/HQ_ROOT")
+    p_init.add_argument("--root", help="where the archive lives (defaults to $HQ_ROOT)")
+    p_init.add_argument("--install-skill", action="store_true", help="copy the Claude Code skill to ~/.claude/skills/hq")
+    p_init.set_defaults(func=cmd_init)
+
+    p_save = sub.add_parser("save", help="save a new task/bug/presentation/learning")
+    p_save.add_argument("kind", choices=hq_core.KINDS)
+    p_save.add_argument("title")
+    p_save.add_argument("--project")
+    p_save.add_argument("--tags", default="")
+    p_save.set_defaults(func=cmd_save)
+
+    p_start = sub.add_parser("start", help="promote a planning task to active")
+    p_start.add_argument("slug")
+    p_start.add_argument("--project")
+    p_start.set_defaults(func=cmd_start)
+
+    p_archive = sub.add_parser("archive", help="archive a planning or active task")
+    p_archive.add_argument("slug")
+    p_archive.add_argument("--project")
+    p_archive.set_defaults(func=cmd_archive)
+
+    p_list = sub.add_parser("list", help="list tasks")
+    p_list.add_argument("--project")
+    p_list.add_argument("--status", choices=hq_core.STATUSES)
+    p_list.add_argument("--json", action="store_true")
+    p_list.set_defaults(func=cmd_list)
+
+    p_find = sub.add_parser("find", help="search tasks and learnings")
+    p_find.add_argument("query")
+    p_find.add_argument("--json", action="store_true")
+    p_find.set_defaults(func=cmd_find)
+
+    p_serve = sub.add_parser("serve", help="browse the archive in a browser")
+    p_serve.add_argument("--port", type=int, default=8787)
+    p_serve.add_argument("--no-open", action="store_true")
+    p_serve.set_defaults(func=cmd_serve)
+
+    p_log = sub.add_parser("log", help="show the action log")
+    p_log.add_argument("--project")
+    p_log.add_argument("--since", help="ISO date/time lower bound, e.g. 2026-08-01")
+    p_log.set_defaults(func=cmd_log)
+
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as e:
+        return e.code if isinstance(e.code, int) else 1
+    if args.command in ("save", "start", "archive") and "HQ_ROOT" not in os.environ:
+        print(f"warning: HQ_ROOT is not set, writing to {hq_core.HQ_ROOT}. Run `hq init`.", file=sys.stderr)
+    try:
+        args.func(args)
+    except HqError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
