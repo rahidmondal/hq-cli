@@ -25,6 +25,54 @@ def slugify(title: str) -> str:
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.DOTALL)
 
 
+_YAML_RESERVED = {"true", "false", "yes", "no", "null", "~", "on", "off"}
+_YAML_BAD_START = tuple("[]{}&*!|>'\"%@`#,?")
+
+
+def yaml_scalar(value: str) -> str:
+    """Return value as-is when it is plain-YAML safe, else a double-quoted
+    (JSON-escaped) string. The empty string stays empty (v1 wrote `key: `)."""
+    if value == "":
+        return value
+    needs_quote = (
+        ": " in value
+        or " #" in value
+        or value.endswith(":")
+        or value.startswith(_YAML_BAD_START)
+        or value.startswith("- ")
+        or value != value.strip()
+        or value.lower() in _YAML_RESERVED
+    )
+    return json.dumps(value, ensure_ascii=False) if needs_quote else value
+
+
+def _unquote(value: str) -> str:
+    if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            return value
+        if isinstance(decoded, str):
+            return decoded
+    return value
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Write text to path via a sibling temp file and os.replace."""
+    path = Path(path)
+    tmp = path.parent / f".{path.name}.tmp-{os.getpid()}"
+    try:
+        with tmp.open("w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
 def frontmatter_parse(text: str) -> tuple[dict, str]:
     match = _FRONTMATTER_RE.match(text)
     if not match:
@@ -38,10 +86,10 @@ def frontmatter_parse(text: str) -> tuple[dict, str]:
         key = key.strip()
         value = value.strip()
         if value.startswith("[") and value.endswith("]"):
-            items = [v.strip() for v in value[1:-1].split(",") if v.strip()]
+            items = [_unquote(v.strip()) for v in value[1:-1].split(",") if v.strip()]
             meta[key] = items
         else:
-            meta[key] = value
+            meta[key] = _unquote(value)
     return meta, body
 
 
@@ -49,9 +97,9 @@ def frontmatter_dump(meta: dict, body: str) -> str:
     lines = ["---"]
     for key, value in meta.items():
         if isinstance(value, list):
-            lines.append(f"{key}: [{', '.join(value)}]")
+            lines.append(f"{key}: [{', '.join(yaml_scalar(v) for v in value)}]")
         else:
-            lines.append(f"{key}: {value}")
+            lines.append(f"{key}: {yaml_scalar(value)}")
     lines.append("---")
     return "\n".join(lines) + "\n\n" + body.lstrip("\n")
 
@@ -159,7 +207,7 @@ def save(kind: str, title: str, project_override: str | None = None,
             raise HqError(f"learning already exists: {path}")
         meta = {"kind": "learning", "created": created, "tags": tags}
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(frontmatter_dump(meta, f"# {title}\n\n"), encoding="utf-8")
+        atomic_write_text(path, frontmatter_dump(meta, f"# {title}\n\n"))
         log_action("save", kind=kind, slug=slug, project=None, status=None)
         return path
 
@@ -170,14 +218,14 @@ def save(kind: str, title: str, project_override: str | None = None,
         dir_path.mkdir(parents=True, exist_ok=True)
         meta = {"kind": "skill", "created": created, "tags": tags}
         readme = dir_path / "README.md"
-        readme.write_text(
+        atomic_write_text(
+            readme,
             frontmatter_dump(meta, f"# {title}\n\nNotes about this skill (not the skill body itself — see SKILL.md).\n"),
-            encoding="utf-8",
         )
         skill_meta = {"name": slug, "description": title}
-        (dir_path / "SKILL.md").write_text(
+        atomic_write_text(
+            dir_path / "SKILL.md",
             frontmatter_dump(skill_meta, f"# {title}\n\nSkill body goes here.\n"),
-            encoding="utf-8",
         )
         log_action("save", kind=kind, slug=slug, project=None, status=None)
         return readme
@@ -191,7 +239,7 @@ def save(kind: str, title: str, project_override: str | None = None,
     meta = {"project": project, "kind": kind, "status": status,
              "created": created, "tags": tags}
     readme = dir_path / "README.md"
-    readme.write_text(frontmatter_dump(meta, f"# {title}\n\n"), encoding="utf-8")
+    atomic_write_text(readme, frontmatter_dump(meta, f"# {title}\n\n"))
     log_action("save", kind=kind, project=project, slug=slug, status=status)
     return readme
 
@@ -220,7 +268,7 @@ def start(slug: str, project_override: str | None = None) -> Path:
     dest = task_path(project, "active", slug)
     dest.parent.mkdir(parents=True, exist_ok=True)
     src.rename(dest)
-    (dest / "README.md").write_text(frontmatter_dump(meta, body), encoding="utf-8")
+    atomic_write_text(dest / "README.md", frontmatter_dump(meta, body))
     log_action("start", project=project, slug=slug, from_status="planning", to_status="active")
     return dest
 
@@ -237,7 +285,7 @@ def archive(slug: str, project_override: str | None = None) -> Path:
     dest = task_path(project, "archive", slug)
     dest.parent.mkdir(parents=True, exist_ok=True)
     src.rename(dest)
-    (dest / "README.md").write_text(frontmatter_dump(meta, body), encoding="utf-8")
+    atomic_write_text(dest / "README.md", frontmatter_dump(meta, body))
     log_action("archive", project=project, slug=slug, from_status=from_status, to_status="archive")
     return dest
 
