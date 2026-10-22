@@ -101,3 +101,116 @@ def filter_records(records, area=None, goal=None, priority=None,
             continue
         out.append(r)
     return out
+
+
+def _noun(ref: Ref) -> str:
+    return "goal" if ref.kind == "goal" else "entry"
+
+
+def _read(ref: Ref) -> tuple[dict, str]:
+    try:
+        return hq_core.frontmatter_parse(ref.path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as e:
+        raise HqError(f"can't read {ref.path}: {e}")
+
+
+def _log_id(ref: Ref) -> dict:
+    if ref.kind == "goal":
+        return {"goal": ref.slug}
+    return {"project": ref.project, "slug": ref.slug}
+
+
+def set_field(ref: str, field: str, value: str, project: str | None = None) -> Path:
+    r = resolve_ref(ref, project=project)
+    allowed = hq_fields.GOAL_SET_FIELDS if r.kind == "goal" else hq_fields.ENTRY_SET_FIELDS
+    if field not in allowed:
+        raise HqError(f"can't set '{field}' on a {_noun(r)} (allowed: {', '.join(allowed)})")
+    clear = str(value).strip().lower() == "none"
+    new = None if clear else hq_fields.normalize(field, value)
+    if field == "goal" and new is not None and hq_registry.get_goal(new) is None:
+        raise HqError(f"unknown goal '{new}'")
+    meta, body = _read(r)
+    old = meta.get(field)
+    if clear:
+        meta.pop(field, None)
+    else:
+        meta[field] = new
+    hq_core.atomic_write_text(r.path, hq_core.frontmatter_dump(meta, body))
+    hq_core.log_action("set", **_log_id(r), field=field, **{"from": old, "to": new})
+    return r.path
+
+
+def add_note(ref: str, text: str, project: str | None = None) -> None:
+    if not text or not text.strip():
+        raise HqError("note text is empty")
+    r = resolve_ref(ref, project=project)
+    hq_core.log_action("note", **_log_id(r), text=text)
+
+
+def block(ref: str, reason: str, project: str | None = None) -> Path:
+    if not reason or not reason.strip():
+        raise HqError("block reason is empty")
+    r = resolve_ref(ref, project=project, goals=False)
+    if r.status not in ("planning", "active"):
+        raise HqError(f"can't block '{r.slug}': it is {r.status}")
+    meta, body = _read(r)
+    meta["blocked"] = reason.strip()
+    hq_core.atomic_write_text(r.path, hq_core.frontmatter_dump(meta, body))
+    hq_core.log_action("block", project=r.project, slug=r.slug, reason=reason.strip())
+    return r.path
+
+
+def unblock(ref: str, project: str | None = None) -> Path:
+    r = resolve_ref(ref, project=project, goals=False)
+    meta, body = _read(r)
+    if not str(meta.get("blocked", "")).strip():
+        raise HqError(f"'{r.slug}' is not blocked")
+    del meta["blocked"]
+    hq_core.atomic_write_text(r.path, hq_core.frontmatter_dump(meta, body))
+    hq_core.log_action("unblock", project=r.project, slug=r.slug)
+    return r.path
+
+
+def unstart(ref: str, reason: str | None = None, project: str | None = None) -> Path:
+    r = resolve_ref(ref, project=project, goals=False)
+    if r.status != "active":
+        raise HqError(f"'{r.slug}' is not active")
+    meta, body = _read(r)
+    meta["status"] = "planning"
+    src = r.path.parent
+    dest = hq_core.task_path(r.project, "planning", r.slug)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    src.rename(dest)
+    hq_core.atomic_write_text(dest / "README.md", hq_core.frontmatter_dump(meta, body))
+    hq_core.log_action("unstart", project=r.project, slug=r.slug, reason=reason or None)
+    return dest / "README.md"
+
+
+def show(ref: str, project: str | None = None, log_limit: int = 10) -> dict:
+    r = resolve_ref(ref, project=project)
+    meta, body = _read(r)
+    files = sorted(p.name for p in r.path.parent.iterdir()
+                   if p.name != "README.md" and not p.name.startswith("."))
+    out = {"kind": r.kind}
+    if r.kind == "goal":
+        record = hq_registry.get_goal(r.slug)
+        if record is None:
+            raise HqError(f"can't read {r.path}")
+        lines = [e for e in hq_core.read_log()
+                 if (e.get("slug") == r.slug and not e.get("project")) or e.get("goal") == r.slug]
+        tasks = [{"project": t["project"], "status": t["status"], "slug": t["slug"],
+                  "title": t["title"], "blocked": t["blocked"]}
+                 for t in entry_records() if t["goal"] == r.slug]
+    else:
+        record = next((t for t in entry_records(project=r.project, status=r.status)
+                       if t["slug"] == r.slug), None)
+        if record is None:
+            raise HqError(f"can't read {r.path}")
+        lines = [e for e in hq_core.read_log()
+                 if e.get("slug") == r.slug and e.get("project") == r.project]
+        tasks = None
+    out.update(record=record, body=body.strip("\n"), files=files,
+               log=lines[-log_limit:] if log_limit > 0 else [])
+    if tasks is not None:
+        out["tasks"] = tasks
+    return out

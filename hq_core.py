@@ -58,10 +58,14 @@ _YAML_BAD_START = tuple("[]{}&*!|>'\"%@`#,?")
 def yaml_scalar(value: str) -> str:
     """Return value as-is when it is plain-YAML safe, else a double-quoted
     (JSON-escaped) string. The empty string stays empty (v1 wrote `key: `)."""
+    if not isinstance(value, str):
+        value = str(value)
     if value == "":
         return value
     needs_quote = (
-        ": " in value
+        "\n" in value
+        or "\r" in value
+        or ": " in value
         or " #" in value
         or value.endswith(":")
         or value.startswith(_YAML_BAD_START)

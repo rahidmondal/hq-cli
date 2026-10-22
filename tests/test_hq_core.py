@@ -453,6 +453,12 @@ class TestYamlSafe(unittest.TestCase):
         self.assertEqual(hq_core.yaml_scalar("a: b"), '"a: b"')
         self.assertEqual(hq_core.yaml_scalar(""), "")
 
+    def test_yaml_scalar_quotes_newlines_and_coerces_non_str(self):
+        self.assertEqual(hq_core.yaml_scalar("a\nb"), '"a\\nb"')
+        self.assertEqual(hq_core.yaml_scalar(5), "5")
+        meta, _ = hq_core.frontmatter_parse(hq_core.frontmatter_dump({"k": "a\nb"}, "x"))
+        self.assertEqual(meta["k"], "a\nb")
+
 
 if __name__ == "__main__":
     unittest.main()

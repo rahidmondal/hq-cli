@@ -170,8 +170,98 @@ def cmd_serve(args):
     hq_serve.serve(args.port, open_browser=not args.no_open)
 
 
+def _local_ts(ts: str) -> str:
+    import datetime
+
+    try:
+        return datetime.datetime.fromisoformat(ts).astimezone().strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return str(ts)
+
+
+_LOG_HIDDEN = ("ts", "action", "project", "slug", "goal", "by")
+
+
+def _log_line(e):
+    detail = " ".join(f"{k}={'-' if v is None else v}" for k, v in e.items()
+                      if k not in _LOG_HIDDEN)
+    return f"{_local_ts(e.get('ts', ''))} {e.get('action', '')} {detail}".rstrip()
+
+
+def _field_text(key, value):
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    if key == "est":
+        return hq_fields.format_est(value)
+    return str(value)
+
+
 def cmd_show(args):
     require_advanced("show")
+    import hq_ops
+
+    data = hq_ops.show(args.ref, project=args.project)
+    record = {k: (str(v) if k == "path" else v) for k, v in data["record"].items()}
+    if args.json:
+        print(json.dumps({**data, "record": record}))
+        return
+    print(record["title"])
+    for k, v in record.items():
+        if k in ("title", "path") or v in (None, "", []):
+            continue
+        print(f"{k}: {_field_text(k, v)}")
+    print()
+    if data["body"]:
+        print(data["body"])
+    if data["files"]:
+        print("files:")
+        for f in data["files"]:
+            print(f"  {f}")
+    if "tasks" in data:
+        print("tasks:")
+        for t in data["tasks"]:
+            flag = " [blocked]" if t["blocked"] else ""
+            print(f"  {t['project']}/{t['status']}/{t['slug']}  {t['title']}{flag}")
+    if data["log"]:
+        print("log:")
+        for e in data["log"]:
+            print(f"  {_log_line(e)}")
+
+
+def cmd_set(args):
+    require_advanced("set")
+    import hq_ops
+
+    print(hq_ops.set_field(args.ref, args.field, args.value, project=args.project))
+
+
+def cmd_note(args):
+    require_advanced("note")
+    import hq_ops
+
+    hq_ops.add_note(args.ref, args.text, project=args.project)
+    print(hq_ops.resolve_ref(args.ref, project=args.project).path)
+
+
+def cmd_block(args):
+    require_advanced("block")
+    import hq_ops
+
+    print(hq_ops.block(args.ref, args.reason, project=args.project))
+
+
+def cmd_unblock(args):
+    require_advanced("unblock")
+    import hq_ops
+
+    print(hq_ops.unblock(args.ref, project=args.project))
+
+
+def cmd_unstart(args):
+    require_advanced("unstart")
+    import hq_ops
+
+    print(hq_ops.unstart(args.ref, reason=args.reason, project=args.project))
 
 
 def format_goal_table(goals):
@@ -281,9 +371,41 @@ def build_parser():
     p_log.add_argument("--since", help="ISO date/time lower bound, e.g. 2026-08-01")
     p_log.set_defaults(func=cmd_log)
 
-    p_show = sub.add_parser("show", help="show one entry (advanced mode)")
-    p_show.add_argument("slug")
+    p_show = sub.add_parser("show", help="show one entry or goal (advanced mode)")
+    p_show.add_argument("ref")
+    p_show.add_argument("--project")
+    p_show.add_argument("--json", action="store_true")
     p_show.set_defaults(func=cmd_show)
+
+    p_setf = sub.add_parser("set", help="set an entry/goal field; 'none' clears (advanced mode)")
+    p_setf.add_argument("ref")
+    p_setf.add_argument("field")
+    p_setf.add_argument("value")
+    p_setf.add_argument("--project")
+    p_setf.set_defaults(func=cmd_set)
+
+    p_note = sub.add_parser("note", help="log a note against an entry/goal (advanced mode)")
+    p_note.add_argument("ref")
+    p_note.add_argument("text")
+    p_note.add_argument("--project")
+    p_note.set_defaults(func=cmd_note)
+
+    p_block = sub.add_parser("block", help="mark an entry blocked (advanced mode)")
+    p_block.add_argument("ref")
+    p_block.add_argument("reason")
+    p_block.add_argument("--project")
+    p_block.set_defaults(func=cmd_block)
+
+    p_unblock = sub.add_parser("unblock", help="clear an entry's blocked flag (advanced mode)")
+    p_unblock.add_argument("ref")
+    p_unblock.add_argument("--project")
+    p_unblock.set_defaults(func=cmd_unblock)
+
+    p_unstart = sub.add_parser("unstart", help="move an active entry back to planning (advanced mode)")
+    p_unstart.add_argument("ref")
+    p_unstart.add_argument("--reason")
+    p_unstart.add_argument("--project")
+    p_unstart.set_defaults(func=cmd_unstart)
 
     p_goal = sub.add_parser("goal", help="manage goals (advanced mode)")
     gsub = p_goal.add_subparsers(dest="goal_cmd", required=True)
@@ -321,7 +443,8 @@ def main(argv=None):
         return e.code if isinstance(e.code, int) else 1
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
-    if args.command in ("save", "start", "archive", "goal", "project") and "HQ_ROOT" not in os.environ:
+    if args.command in ("save", "start", "archive", "goal", "project",
+                        "set", "note", "block", "unblock", "unstart") and "HQ_ROOT" not in os.environ:
         print(f"warning: HQ_ROOT is not set, writing to {hq_core.HQ_ROOT}. Run `hq init`.", file=sys.stderr)
     try:
         if hq_core.mode() == "advanced":
