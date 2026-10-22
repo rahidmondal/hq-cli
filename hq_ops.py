@@ -37,22 +37,30 @@ def _goal_refs() -> list[Ref]:
 def resolve_ref(ref: str, project: str | None = None, goals: bool = True,
                 statuses: tuple = hq_core.STATUSES) -> Ref:
     """Resolve a slug (exact first, then substring) to one entry or goal.
-    A `goal/` prefix restricts to goals; empty `statuses` means goals only."""
+    A `goal/` prefix restricts to goals; empty `statuses` means goals only.
+    Exact matches are looked up across every status: an exact slug in an
+    excluded status is an error, never a fall-through to substring matching."""
     text = ref.strip()
     goals_only = text.startswith("goal/")
     if goals_only:
         text = text[len("goal/"):]
         goals = True
-    candidates: list[Ref] = []
+    every: list[Ref] = []
     if not goals_only:
-        for st in statuses:
-            for e in hq_core.list_entries(project=project, status=st):
-                candidates.append(Ref("entry", e["slug"], e["project"], e["status"], e["path"]))
+        for e in hq_core.list_entries(project=project):
+            every.append(Ref("entry", e["slug"], e["project"], e["status"], e["path"]))
     if goals:
-        candidates.extend(_goal_refs())
+        every.extend(_goal_refs())
+    candidates = [c for c in every if c.kind == "goal" or c.status in statuses]
 
     needle = text.lower()
-    matches = [c for c in candidates if c.slug == text] if text else []
+    exact = [c for c in every if c.slug == text] if text else []
+    matches = [c for c in exact if c in candidates]
+    if exact and not matches:
+        found = "/".join(st for st in hq_core.STATUSES
+                         if any(c.status == st for c in exact))
+        wanted = "/".join(statuses) or "a goal"
+        raise HqError(f"'{text}' is {found}, not {wanted}")
     if not matches:
         matches = [c for c in candidates if needle and needle in c.slug.lower()]
     if not matches:
