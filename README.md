@@ -91,6 +91,55 @@ or sync it however you like.
 
 Every command also has `--help`.
 
+## Advanced mode
+
+hq has two modes. **Classic** is the default and behaves exactly like v1:
+same output, same files, same log lines. **Advanced** is a superset that adds
+priorities, due dates, goals, areas, blocking, notes and a health check.
+
+```
+hq init --mode advanced     # switch on
+hq init --mode classic      # switch back
+```
+
+The mode lives in `$HQ_ROOT/.hq/config.json`; a missing file means classic.
+There is no migration: switching in either direction rewrites nothing. Missing
+fields get read-time defaults (priority `P3`; area from goal, then project,
+then `work`, or `personal` for a project named `personal`), and classic mode
+leaves advanced fields in your files untouched. Advanced-only commands run in
+classic mode print `hq: '<cmd>' needs advanced mode` and exit 1.
+
+| Command | Flags | Does |
+|---|---|---|
+| `hq save <kind> "<title>"` | `--priority P1-P4`, `--goal G`, `--due D`, `--do-on D`, `--est E`, `--area A` | Same as classic, with extra fields. |
+| `hq list` | `--area A`, `--goal G`, `--priority P`, `--due-before D` | Adds priority, area and due columns, and filters. Blocked entries show as `blocked`. |
+| `hq archive <ref>` | `--dropped` | Archive as `done` (default) or `dropped`; records the outcome. |
+| `hq start <ref>`, `hq unstart <ref>` | `--reason TEXT` (unstart) | Promote to `active`, or move an active entry back to `planning`. |
+| `hq show <ref>` | `--json` | Show one entry or goal with its fields. |
+| `hq set <ref> <field> <value>` | `--project X` | Set a field; the value `none` clears it. |
+| `hq note <ref> "<text>"` | `--project X` | Log a note against an entry or goal. |
+| `hq block <ref> "<reason>"`, `hq unblock <ref>` | `--project X` | Mark or clear an entry as blocked. |
+| `hq goal new "<title>"` | `--area A`, `--target D`, `--priority P`, `--tags a,b` | Create a goal (stored in `goals/`). |
+| `hq goal list` | `--status active\|done\|dropped`, `--area A`, `--json` | List goals. |
+| `hq goal done <ref>` | `--dropped` | Close a goal. |
+| `hq project set <project> area <area>` | | Set a project's default area (stored in `.hq/projects.json`). |
+| `hq check` | `--json` | Scan the archive for problems. |
+
+`<ref>` is a slug or any unique substring of one; an ambiguous ref is an error
+that lists the matches.
+
+**Who acted.** The top-level `--by user|agent|web` flag (or the `HQ_ACTOR`
+environment variable, default `user`) tags each log line with `"by"`, e.g.
+`hq --by agent save task "..."`. Classic mode never writes `by`.
+
+**Formats.**
+
+| Field | Accepts | Example |
+|---|---|---|
+| priority | `P1`-`P4` (also `p1` or `1`); default `P3` | `--priority p1` |
+| dates (`--due`, `--do-on`, `--target`) | `YYYY-MM-DD`, `today`, `tomorrow`, `+Nd`, `+Nw` (local date) | `--due +2w` |
+| estimate (`--est`) | `20m`, `1h`, `1h30m`, or bare minutes | `--est 1h30m` |
+
 ## Browsing with `hq serve`
 
 `hq serve` starts a local server on `127.0.0.1` and opens it in your browser.

@@ -8,6 +8,11 @@ Commands: `hq init [--root PATH] [--install-skill]`,
 `hq save <kind> "<title>" [--project X] [--tags a,b]`, `hq start <slug>`,
 `hq archive <slug>`, `hq list [--project X] [--status S] [--json]`, `hq find <query> [--json]`,
 `hq log [--project X] [--since DATE]`, `hq serve [--port N] [--no-open]`.
+Advanced mode (`hq init --mode advanced`) adds `save --priority/--goal/--due/--do-on/--est/--area`,
+`list --area/--goal/--priority/--due-before`, `archive --dropped`, `show`, `set`, `note`, `block`,
+`unblock`, `unstart`, `goal new|list|done`, `project set <p> area <a>`, `check`, and top-level
+`--by user|agent|web` (or `HQ_ACTOR`). Classic mode (the default, no `.hq/config.json`) must stay
+byte-for-byte v1; `tests/test_classic_regression.py` guards that.
 Kinds: `task, bug, presentation, learning, skill`.
 Statuses: `planning, active, archive`.
 

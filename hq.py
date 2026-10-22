@@ -469,6 +469,8 @@ def main(argv=None):
             if actor not in hq_core.ACTORS:
                 raise HqError(f"invalid HQ_ACTOR {actor!r}; choose from {', '.join(hq_core.ACTORS)}")
             hq_core.ACTOR = actor
+        else:
+            hq_core.ACTOR = None  # classic never tags log lines, even in-process after an advanced run
         rc = args.func(args)
         if isinstance(rc, int):
             return rc
