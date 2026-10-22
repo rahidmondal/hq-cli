@@ -427,17 +427,19 @@ class TestYamlSafe(unittest.TestCase):
         for v in ["waiting: on keys", "#1 blocker", 'say "hi"', "[not a list",
                   "- dash", "yes", "naïve café"]:
             with self.subTest(v=v):
-                text = hq_core.frontmatter_dump({"blocked": v}, "# T\n")
-                self.assertEqual(hq_core.frontmatter_parse(text)[0]["blocked"], v)
+                text = hq_core.frontmatter_dump({"blocked": v}, "# T\n", yaml_safe=True)
+                self.assertEqual(
+                    hq_core.frontmatter_parse(text, yaml_safe=True)[0]["blocked"], v)
 
     def test_hostile_values_are_quoted_in_output(self):
-        text = hq_core.frontmatter_dump({"blocked": "waiting: on keys"}, "# T\n")
+        text = hq_core.frontmatter_dump({"blocked": "waiting: on keys"}, "# T\n",
+                                        yaml_safe=True)
         self.assertIn('blocked: "waiting: on keys"\n', text)
 
     def test_quoted_list_items_round_trip(self):
         tags = ["a", "#hash", "x: y", "yes"]
-        text = hq_core.frontmatter_dump({"tags": tags}, "# T\n")
-        self.assertEqual(hq_core.frontmatter_parse(text)[0]["tags"], tags)
+        text = hq_core.frontmatter_dump({"tags": tags}, "# T\n", yaml_safe=True)
+        self.assertEqual(hq_core.frontmatter_parse(text, yaml_safe=True)[0]["tags"], tags)
 
     def test_plain_values_unquoted(self):
         meta = {"project": "demo", "kind": "task", "status": "planning",
@@ -456,8 +458,15 @@ class TestYamlSafe(unittest.TestCase):
     def test_yaml_scalar_quotes_newlines_and_coerces_non_str(self):
         self.assertEqual(hq_core.yaml_scalar("a\nb"), '"a\\nb"')
         self.assertEqual(hq_core.yaml_scalar(5), "5")
-        meta, _ = hq_core.frontmatter_parse(hq_core.frontmatter_dump({"k": "a\nb"}, "x"))
+        meta, _ = hq_core.frontmatter_parse(
+            hq_core.frontmatter_dump({"k": "a\nb"}, "x", yaml_safe=True), yaml_safe=True)
         self.assertEqual(meta["k"], "a\nb")
+
+    def test_yaml_safe_false_is_raw_v1(self):
+        meta = {"tags": ["yes", "#u"], "note": '"q"', "other": "key: val"}
+        text = hq_core.frontmatter_dump(meta, "# T\n", yaml_safe=False)
+        self.assertEqual(text, '---\ntags: [yes, #u]\nnote: "q"\nother: key: val\n---\n\n# T\n')
+        self.assertEqual(hq_core.frontmatter_parse(text, yaml_safe=False)[0], meta)
 
 
 if __name__ == "__main__":

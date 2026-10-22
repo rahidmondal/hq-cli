@@ -129,5 +129,39 @@ class TestClassicRegression(TempRoot):
         self.assertIn("reading", page)
 
 
+class TestClassicRawFrontmatter(TempRoot):
+    """Classic reads/writes frontmatter exactly like v1: no YAML quoting or unquoting."""
+
+    def test_classic_save_does_not_quote_tags(self):
+        code, out, err = run_cli(["save", "task", "A", "--project", "demo",
+                                  "--tags", "yes,#urgent,@me,on"])
+        self.assertEqual(code, 0, err)
+        text = entry_file("demo", "planning", "a").read_text(encoding="utf-8")
+        self.assertIn("tags: [yes, #urgent, @me, on]\n", text)
+
+    def _hand_written(self, extra):
+        f = entry_file("demo", "planning", "h")
+        f.parent.mkdir(parents=True)
+        f.write_text("---\nproject: demo\nkind: task\nstatus: planning\n"
+                     "created: 2026-01-01\n" + extra + "---\n\n# H\n", encoding="utf-8")
+        return f
+
+    def test_classic_start_keeps_hand_written_values_byte_identical(self):
+        self._hand_written('tags: []\nnote: "quoted"\nother: key: val\n')
+        code, _, err = run_cli(["start", "h", "--project", "demo"])
+        self.assertEqual(code, 0, err)
+        after = entry_file("demo", "active", "h").read_text(encoding="utf-8")
+        self.assertEqual(after, "---\nproject: demo\nkind: task\nstatus: active\n"
+                                "created: 2026-01-01\ntags: []\nnote: \"quoted\"\n"
+                                "other: key: val\n---\n\n# H\n")
+
+    def test_classic_list_json_keeps_quotes_in_list_items(self):
+        self._hand_written('tags: ["q", plain]\n')
+        code, out, _ = run_cli(["list", "--json"])
+        self.assertEqual(code, 0)
+        self.assertIn('"tags": ["\\"q\\"", "plain"]', out)
+        self.assertEqual(json.loads(out)["tags"], ['"q"', "plain"])
+
+
 if __name__ == "__main__":
     unittest.main()

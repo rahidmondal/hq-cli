@@ -103,10 +103,16 @@ def atomic_write_text(path: Path, text: str) -> None:
         raise
 
 
-def frontmatter_parse(text: str) -> tuple[dict, str]:
+def _yaml_safe(yaml_safe: bool | None) -> bool:
+    """None means: YAML quoting on in advanced mode, raw v1 behavior in classic."""
+    return mode() == "advanced" if yaml_safe is None else yaml_safe
+
+
+def frontmatter_parse(text: str, yaml_safe: bool | None = None) -> tuple[dict, str]:
     match = _FRONTMATTER_RE.match(text)
     if not match:
         return {}, text
+    unq = _unquote if _yaml_safe(yaml_safe) else (lambda v: v)
     raw, body = match.group(1), match.group(2)
     meta: dict = {}
     for line in raw.splitlines():
@@ -116,20 +122,21 @@ def frontmatter_parse(text: str) -> tuple[dict, str]:
         key = key.strip()
         value = value.strip()
         if value.startswith("[") and value.endswith("]"):
-            items = [_unquote(v.strip()) for v in value[1:-1].split(",") if v.strip()]
+            items = [unq(v.strip()) for v in value[1:-1].split(",") if v.strip()]
             meta[key] = items
         else:
-            meta[key] = _unquote(value)
+            meta[key] = unq(value)
     return meta, body
 
 
-def frontmatter_dump(meta: dict, body: str) -> str:
+def frontmatter_dump(meta: dict, body: str, yaml_safe: bool | None = None) -> str:
+    q = yaml_scalar if _yaml_safe(yaml_safe) else (lambda v: v)
     lines = ["---"]
     for key, value in meta.items():
         if isinstance(value, list):
-            lines.append(f"{key}: [{', '.join(yaml_scalar(v) for v in value)}]")
+            lines.append(f"{key}: [{', '.join(q(v) for v in value)}]")
         else:
-            lines.append(f"{key}: {yaml_scalar(value)}")
+            lines.append(f"{key}: {q(value)}")
     lines.append("---")
     return "\n".join(lines) + "\n\n" + body.lstrip("\n")
 
