@@ -311,6 +311,19 @@ def cmd_project(args):
     print(f"{args.project}: area = {hq_fields.parse_area(args.value)}")
 
 
+def cmd_check(args):
+    require_advanced("check")
+    import hq_check
+
+    problems = hq_check.run_checks()
+    if not problems:
+        print("ok")
+        return 0
+    for p in problems:
+        print(json.dumps(p) if args.json else f"{p['path']}: {p['problem']}")
+    return 1
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="hq")
     parser.add_argument("--by", choices=hq_core.ACTORS, help="who is acting (advanced mode; default $HQ_ACTOR or user)")
@@ -407,6 +420,10 @@ def build_parser():
     p_unstart.add_argument("--project")
     p_unstart.set_defaults(func=cmd_unstart)
 
+    p_check = sub.add_parser("check", help="scan the archive for problems (advanced mode)")
+    p_check.add_argument("--json", action="store_true")
+    p_check.set_defaults(func=cmd_check)
+
     p_goal = sub.add_parser("goal", help="manage goals (advanced mode)")
     gsub = p_goal.add_subparsers(dest="goal_cmd", required=True)
     g_new = gsub.add_parser("new", help="create a goal")
@@ -452,7 +469,9 @@ def main(argv=None):
             if actor not in hq_core.ACTORS:
                 raise HqError(f"invalid HQ_ACTOR {actor!r}; choose from {', '.join(hq_core.ACTORS)}")
             hq_core.ACTOR = actor
-        args.func(args)
+        rc = args.func(args)
+        if isinstance(rc, int):
+            return rc
     except ModeError as e:
         print(f"hq: '{e.what}' needs advanced mode — run: hq init --mode advanced", file=sys.stderr)
         return 1
