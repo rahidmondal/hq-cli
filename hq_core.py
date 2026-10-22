@@ -62,7 +62,7 @@ def atomic_write_text(path: Path, text: str) -> None:
     path = Path(path)
     tmp = path.parent / f".{path.name}.tmp-{os.getpid()}"
     try:
-        with tmp.open("w", encoding="utf-8", newline="") as f:
+        with tmp.open("w", encoding="utf-8") as f:
             f.write(text)
         os.replace(tmp, path)
     except BaseException:

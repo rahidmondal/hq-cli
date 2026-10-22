@@ -402,6 +402,15 @@ class TestAtomicWrite(unittest.TestCase):
             self.assertEqual(target.read_text(encoding="utf-8"), "b")
             self.assertEqual(list(Path(d).iterdir()), [target])
 
+    def test_atomic_write_matches_path_write_text_bytes(self):
+        text = "---\nkind: task\n---\n\n# T\n\nline\n"
+        with tempfile.TemporaryDirectory() as d:
+            ref = Path(d) / "ref.md"
+            ref.write_text(text, encoding="utf-8")
+            target = Path(d) / "f.md"
+            hq_core.atomic_write_text(target, text)
+            self.assertEqual(target.read_bytes(), ref.read_bytes())
+
     def test_atomic_write_leaves_no_temp_on_error(self):
         with tempfile.TemporaryDirectory() as d:
             target = Path(d) / "f.md"
