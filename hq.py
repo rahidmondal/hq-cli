@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 import hq_core
 import hq_fields
@@ -19,30 +20,12 @@ def require_advanced(what: str) -> None:
         raise ModeError(what)
 
 
-def cmd_save(args):
-    tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
-    path = hq_core.save(args.kind, args.title, project_override=args.project, tags=tags)
-    print(path)
+SAVE_FIELD_FLAGS = (("priority", "priority"), ("goal", "goal"), ("due", "due"),
+                    ("do-on", "do_on"), ("est", "est"), ("area", "area"))
 
 
-def cmd_start(args):
-    path = hq_core.start(args.slug, project_override=args.project)
-    print(path)
-
-
-def cmd_archive(args):
-    path = hq_core.archive(args.slug, project_override=args.project)
-    print(path)
-
-
-def format_table(entries):
-    if not entries:
-        return "(no entries)"
-    header = ("PROJECT", "STATUS", "KIND", "SLUG", "TITLE")
-    rows = [header] + [
-        (e["project"] or "-", e["status"] or "-", e["kind"], e["slug"], e["title"])
-        for e in entries
-    ]
+def _render_table(header, rows):
+    rows = [header] + rows
     widths = [max(len(row[i]) for row in rows) for i in range(len(header))]
     return "\n".join(
         "  ".join(row[i].ljust(widths[i]) for i in range(len(header)))
@@ -50,7 +33,100 @@ def format_table(entries):
     )
 
 
+def cmd_save(args):
+    tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
+    fields = {}
+    for flag, attr in SAVE_FIELD_FLAGS:
+        value = getattr(args, attr)
+        if value is not None:
+            require_advanced(f"--{flag}")
+            fields[flag] = hq_fields.normalize(flag, value)
+    advanced = hq_core.mode() == "advanced"
+    if fields:
+        if args.kind in ("learning", "skill"):
+            raise HqError(f"kind={args.kind!r} does not take {', '.join('--' + f for f in fields)}")
+        if "goal" in fields:
+            import hq_registry
+
+            if hq_registry.get_goal(fields["goal"]) is None:
+                raise HqError(f"unknown goal '{fields['goal']}'")
+    cwd = Path.cwd()
+    path = hq_core.save(args.kind, args.title, project_override=args.project,
+                        tags=tags, cwd=cwd, fields=fields or None)
+    if advanced and args.project is None and args.kind not in ("learning", "skill"):
+        repo = hq_core.detect_repo_root(cwd)
+        if repo is not None:
+            import hq_registry
+
+            hq_registry.record_repo(path.parent.parent.parent.name, repo)
+    print(path)
+
+
+def cmd_start(args):
+    slug = args.slug
+    if hq_core.mode() == "advanced":
+        import hq_ops
+
+        r = hq_ops.resolve_ref(slug, project=args.project, goals=False, statuses=("planning",))
+        slug, project = r.slug, r.project
+    else:
+        project = args.project
+    print(hq_core.start(slug, project_override=project))
+
+
+def cmd_archive(args):
+    slug, project, outcome = args.slug, args.project, None
+    if hq_core.mode() == "advanced":
+        import hq_ops
+
+        r = hq_ops.resolve_ref(slug, project=args.project, goals=False,
+                               statuses=("planning", "active"))
+        slug, project = r.slug, r.project
+        outcome = "dropped" if args.dropped else "done"
+    elif args.dropped:
+        require_advanced("--dropped")
+    print(hq_core.archive(slug, project_override=project, outcome=outcome))
+
+
+def format_table(entries):
+    if not entries:
+        return "(no entries)"
+    return _render_table(
+        ("PROJECT", "STATUS", "KIND", "SLUG", "TITLE"),
+        [(e["project"] or "-", e["status"] or "-", e["kind"], e["slug"], e["title"])
+         for e in entries],
+    )
+
+
+def format_advanced_table(records):
+    if not records:
+        return "(no entries)"
+    return _render_table(
+        ("PROJECT", "STATUS", "KIND", "P", "AREA", "DUE", "SLUG", "TITLE"),
+        [(r["project"] or "-", "blocked" if r["blocked"] else (r["status"] or "-"),
+          r["kind"] or "-", r["priority"], r["area"], r["due"] or "-", r["slug"], r["title"])
+         for r in records],
+    )
+
+
 def cmd_list(args):
+    if hq_core.mode() == "advanced":
+        import hq_ops
+
+        records = hq_ops.filter_records(
+            hq_ops.entry_records(project=args.project, status=args.status),
+            area=args.area, goal=args.goal, priority=args.priority,
+            due_before=args.due_before)
+        if args.json:
+            for r in records:
+                print(json.dumps({**r, "path": str(r["path"])}))
+            return
+        print(format_advanced_table(records))
+        return
+    for flag, attr in (("area", "area"), ("goal", "goal"), ("priority", "priority"),
+                       ("due-before", "due_before")):
+        if getattr(args, attr) is not None:
+            require_advanced(f"--{flag}")
     entries = hq_core.list_entries(project=args.project, status=args.status)
     if args.json:
         for e in entries:
@@ -129,7 +205,10 @@ def cmd_goal(args):
             return
         print(format_goal_table(goals))
     else:
-        print(hq_registry.finish_goal(args.ref, dropped=args.dropped))
+        import hq_ops
+
+        r = hq_ops.resolve_ref(args.ref, statuses=())
+        print(hq_registry.finish_goal(r.slug, dropped=args.dropped))
 
 
 def cmd_project(args):
@@ -158,6 +237,12 @@ def build_parser():
     p_save.add_argument("title")
     p_save.add_argument("--project")
     p_save.add_argument("--tags", default="")
+    p_save.add_argument("--priority")
+    p_save.add_argument("--goal")
+    p_save.add_argument("--due")
+    p_save.add_argument("--do-on", dest="do_on")
+    p_save.add_argument("--est")
+    p_save.add_argument("--area")
     p_save.set_defaults(func=cmd_save)
 
     p_start = sub.add_parser("start", help="promote a planning task to active")
@@ -168,12 +253,17 @@ def build_parser():
     p_archive = sub.add_parser("archive", help="archive a planning or active task")
     p_archive.add_argument("slug")
     p_archive.add_argument("--project")
+    p_archive.add_argument("--dropped", action="store_true")
     p_archive.set_defaults(func=cmd_archive)
 
     p_list = sub.add_parser("list", help="list tasks")
     p_list.add_argument("--project")
     p_list.add_argument("--status", choices=hq_core.STATUSES)
     p_list.add_argument("--json", action="store_true")
+    p_list.add_argument("--area")
+    p_list.add_argument("--goal")
+    p_list.add_argument("--priority")
+    p_list.add_argument("--due-before", dest="due_before")
     p_list.set_defaults(func=cmd_list)
 
     p_find = sub.add_parser("find", help="search tasks and learnings")
@@ -229,6 +319,8 @@ def main(argv=None):
         args = parser.parse_args(argv)
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else 1
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     if args.command in ("save", "start", "archive", "goal", "project") and "HQ_ROOT" not in os.environ:
         print(f"warning: HQ_ROOT is not set, writing to {hq_core.HQ_ROOT}. Run `hq init`.", file=sys.stderr)
     try:

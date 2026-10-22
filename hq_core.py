@@ -156,6 +156,18 @@ def detect_project(cwd: Path, override: str | None) -> str:
         return slugify(Path(cwd).name)
 
 
+def detect_repo_root(cwd: Path) -> Path | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd, capture_output=True, text=True, check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+    out = result.stdout.strip()
+    return Path(out) if out else None
+
+
 def find_task(slug: str, project: str | None = None) -> list[Path]:
     projects_dir = HQ_ROOT / "projects"
     if not projects_dir.exists():
@@ -218,7 +230,8 @@ def read_log(project: str | None = None, since: str | None = None) -> list[dict]
 
 
 def save(kind: str, title: str, project_override: str | None = None,
-          tags: list[str] | None = None, cwd: Path | None = None) -> Path:
+          tags: list[str] | None = None, cwd: Path | None = None,
+          fields: dict | None = None) -> Path:
     if kind not in KINDS:
         raise HqError(f"unknown kind: {kind!r} (expected one of {KINDS})")
     slug = slugify(title)
@@ -266,6 +279,8 @@ def save(kind: str, title: str, project_override: str | None = None,
     dir_path.mkdir(parents=True, exist_ok=True)
     meta = {"project": project, "kind": kind, "status": status,
              "created": created, "tags": tags}
+    if fields:
+        meta.update(fields)
     readme = dir_path / "README.md"
     atomic_write_text(readme, frontmatter_dump(meta, f"# {title}\n\n"))
     log_action("save", kind=kind, project=project, slug=slug, status=status)
@@ -301,7 +316,8 @@ def start(slug: str, project_override: str | None = None) -> Path:
     return dest
 
 
-def archive(slug: str, project_override: str | None = None) -> Path:
+def archive(slug: str, project_override: str | None = None,
+            outcome: str | None = None) -> Path:
     src = _find_unique(slug, ("planning", "active"), project_override)
     from_status = src.parent.name
     project = src.parent.parent.name
@@ -310,11 +326,15 @@ def archive(slug: str, project_override: str | None = None) -> Path:
         raise HqError(f"task has no README.md: {src}")
     meta, body = frontmatter_parse(readme_src.read_text(encoding="utf-8"))
     meta["status"] = "archive"
+    if outcome:
+        meta["outcome"] = outcome
     dest = task_path(project, "archive", slug)
     dest.parent.mkdir(parents=True, exist_ok=True)
     src.rename(dest)
     atomic_write_text(dest / "README.md", frontmatter_dump(meta, body))
-    log_action("archive", project=project, slug=slug, from_status=from_status, to_status="archive")
+    extra = {"outcome": outcome} if outcome else {}
+    log_action("archive", project=project, slug=slug, from_status=from_status,
+               to_status="archive", **extra)
     return dest
 
 
