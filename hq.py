@@ -7,6 +7,17 @@ import hq_core
 from hq_core import HqError
 
 
+class ModeError(HqError):
+    def __init__(self, what):
+        super().__init__(f"'{what}' needs advanced mode")
+        self.what = what
+
+
+def require_advanced(what: str) -> None:
+    if hq_core.mode() != "advanced":
+        raise ModeError(what)
+
+
 def cmd_save(args):
     tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
     path = hq_core.save(args.kind, args.title, project_override=args.project, tags=tags)
@@ -71,7 +82,7 @@ def cmd_log(args):
 def cmd_init(args):
     import hq_init
 
-    print("\n".join(hq_init.init(args.root, args.install_skill)))
+    print("\n".join(hq_init.init(args.root, args.install_skill, mode=args.mode)))
 
 
 def cmd_serve(args):
@@ -82,13 +93,19 @@ def cmd_serve(args):
     hq_serve.serve(args.port, open_browser=not args.no_open)
 
 
+def cmd_show(args):
+    require_advanced("show")
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="hq")
+    parser.add_argument("--by", choices=hq_core.ACTORS, help="who is acting (advanced mode; default $HQ_ACTOR or user)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init", help="first-time setup: create the data folder and check PATH/HQ_ROOT")
     p_init.add_argument("--root", help="where the archive lives (defaults to $HQ_ROOT)")
     p_init.add_argument("--install-skill", action="store_true", help="copy the Claude Code skill to ~/.claude/skills/hq")
+    p_init.add_argument("--mode", choices=hq_core.MODES, help="switch between classic and advanced mode")
     p_init.set_defaults(func=cmd_init)
 
     p_save = sub.add_parser("save", help="save a new task/bug/presentation/learning")
@@ -129,6 +146,10 @@ def build_parser():
     p_log.add_argument("--since", help="ISO date/time lower bound, e.g. 2026-08-01")
     p_log.set_defaults(func=cmd_log)
 
+    p_show = sub.add_parser("show", help="show one entry (advanced mode)")
+    p_show.add_argument("slug")
+    p_show.set_defaults(func=cmd_show)
+
     return parser
 
 
@@ -141,7 +162,15 @@ def main(argv=None):
     if args.command in ("save", "start", "archive") and "HQ_ROOT" not in os.environ:
         print(f"warning: HQ_ROOT is not set, writing to {hq_core.HQ_ROOT}. Run `hq init`.", file=sys.stderr)
     try:
+        if hq_core.mode() == "advanced":
+            actor = args.by or os.environ.get("HQ_ACTOR") or "user"
+            if actor not in hq_core.ACTORS:
+                raise HqError(f"invalid HQ_ACTOR {actor!r}; choose from {', '.join(hq_core.ACTORS)}")
+            hq_core.ACTOR = actor
         args.func(args)
+    except ModeError as e:
+        print(f"hq: '{e.what}' needs advanced mode — run: hq init --mode advanced", file=sys.stderr)
+        return 1
     except HqError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

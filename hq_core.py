@@ -13,7 +13,33 @@ class HqError(Exception):
 KINDS = ("task", "bug", "presentation", "learning", "skill")
 STATUSES = ("planning", "active", "archive")
 
+MODES = ("classic", "advanced")
+ACTORS = ("user", "agent", "web")
+ACTOR = None  # set by the CLI in advanced mode; tags log lines with "by"
+
 HQ_ROOT = Path(os.environ.get("HQ_ROOT", Path.home() / ".hq"))
+
+
+def config_path() -> Path:
+    return HQ_ROOT / ".hq" / "config.json"
+
+
+def load_config() -> dict:
+    try:
+        cfg = json.loads(config_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def save_config(cfg: dict) -> None:
+    path = config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(path, json.dumps(cfg, indent=2) + "\n")
+
+
+def mode() -> str:
+    return "advanced" if load_config().get("mode") == "advanced" else "classic"
 
 
 def slugify(title: str) -> str:
@@ -162,6 +188,8 @@ def log_action(action: str, **fields) -> None:
         "action": action,
         **fields,
     }
+    if ACTOR is not None:
+        entry["by"] = ACTOR
     log_path = HQ_ROOT / ".log.jsonl"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as f:

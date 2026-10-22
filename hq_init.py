@@ -5,6 +5,7 @@ import shutil
 import sys
 from pathlib import Path
 
+import hq_core
 from hq_core import HqError
 
 HERE = Path(__file__).resolve().parent
@@ -28,8 +29,10 @@ def _persist_path_cmd() -> str:
     return f"echo 'export PATH=\"{HERE}:$PATH\"' >> ~/.bashrc"
 
 
-def init(root_arg: str | None, install_skill: bool) -> list[str]:
+def init(root_arg: str | None, install_skill: bool, mode: str | None = None) -> list[str]:
     """Create the data folder and return a report: '[ok] ...' / '[todo] ...' lines."""
+    if mode is not None and mode not in hq_core.MODES:
+        raise HqError(f"invalid mode {mode!r}; choose from {', '.join(hq_core.MODES)}")
     env_root = os.environ.get("HQ_ROOT")
     if root_arg:
         root = Path(root_arg).expanduser().resolve()
@@ -69,5 +72,27 @@ def init(root_arg: str | None, install_skill: bool) -> list[str]:
         report.append(f"[ok] installed Claude Code skill: {SKILL_TARGET}")
     else:
         report.append("[todo] optional: run `hq init --install-skill` to teach Claude Code the hq commands")
+
+    if mode is not None:
+        # config lives under the root being initialised, which may differ from hq_core.HQ_ROOT
+        orig = hq_core.HQ_ROOT
+        hq_core.HQ_ROOT = root
+        try:
+            cfg = hq_core.load_config()
+            if not cfg:
+                cfg["autostart"] = False
+            cfg["mode"] = mode
+            hq_core.save_config(cfg)
+        finally:
+            hq_core.HQ_ROOT = orig
+        report.append(f"[ok] mode: {mode}")
+    else:
+        orig = hq_core.HQ_ROOT
+        hq_core.HQ_ROOT = root
+        try:
+            if hq_core.config_path().is_file():
+                report.append(f"[ok] mode: {hq_core.mode()}")
+        finally:
+            hq_core.HQ_ROOT = orig
 
     return report
