@@ -171,7 +171,7 @@ class OpsTests(TempRoot):
         self.assertIn("P3", out)
 
     def test_list_prints_non_ascii_title(self):
-        title = "Café — résumé"
+        title = "Café → 日本"
         self.save(title)
         code, out, _ = run_cli(["list"])
         self.assertIn(title, out)
