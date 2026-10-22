@@ -4,6 +4,7 @@ import os
 import sys
 
 import hq_core
+import hq_fields
 from hq_core import HqError
 
 
@@ -97,6 +98,50 @@ def cmd_show(args):
     require_advanced("show")
 
 
+def format_goal_table(goals):
+    if not goals:
+        return "(no goals)"
+    header = ("P", "AREA", "STATUS", "TARGET", "SLUG", "TITLE")
+    rows = [header] + [
+        (g["priority"], g["area"], g["status"], g["target"] or "-", g["slug"], g["title"])
+        for g in goals
+    ]
+    widths = [max(len(row[i]) for row in rows) for i in range(len(header))]
+    return "\n".join(
+        "  ".join(row[i].ljust(widths[i]) for i in range(len(header)))
+        for row in rows
+    )
+
+
+def cmd_goal(args):
+    require_advanced("goal")
+    import hq_registry
+
+    if args.goal_cmd == "new":
+        tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
+        print(hq_registry.create_goal(args.title, area=args.area, target=args.target,
+                                      priority=args.priority, tags=tags))
+    elif args.goal_cmd == "list":
+        goals = hq_registry.list_goals(status=args.status, area=args.area)
+        if args.json:
+            for g in goals:
+                print(json.dumps({**g, "path": str(g["path"])}))
+            return
+        print(format_goal_table(goals))
+    else:
+        print(hq_registry.finish_goal(args.ref, dropped=args.dropped))
+
+
+def cmd_project(args):
+    require_advanced("project")
+    import hq_registry
+
+    if args.field != "area":
+        raise HqError(f"cannot set {args.field!r} on a project (only: area)")
+    hq_registry.set_project_area(args.project, args.value)
+    print(f"{args.project}: area = {hq_fields.parse_area(args.value)}")
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="hq")
     parser.add_argument("--by", choices=hq_core.ACTORS, help="who is acting (advanced mode; default $HQ_ACTOR or user)")
@@ -150,6 +195,31 @@ def build_parser():
     p_show.add_argument("slug")
     p_show.set_defaults(func=cmd_show)
 
+    p_goal = sub.add_parser("goal", help="manage goals (advanced mode)")
+    gsub = p_goal.add_subparsers(dest="goal_cmd", required=True)
+    g_new = gsub.add_parser("new", help="create a goal")
+    g_new.add_argument("title")
+    g_new.add_argument("--area", default="work")
+    g_new.add_argument("--target")
+    g_new.add_argument("--priority")
+    g_new.add_argument("--tags", default="")
+    g_list = gsub.add_parser("list", help="list goals")
+    g_list.add_argument("--status", choices=("active", "done", "dropped"))
+    g_list.add_argument("--area")
+    g_list.add_argument("--json", action="store_true")
+    g_done = gsub.add_parser("done", help="mark a goal done")
+    g_done.add_argument("ref")
+    g_done.add_argument("--dropped", action="store_true")
+    p_goal.set_defaults(func=cmd_goal)
+
+    p_project = sub.add_parser("project", help="project settings (advanced mode)")
+    psub = p_project.add_subparsers(dest="project_cmd", required=True)
+    p_set = psub.add_parser("set", help="set a project field")
+    p_set.add_argument("project")
+    p_set.add_argument("field")
+    p_set.add_argument("value")
+    p_project.set_defaults(func=cmd_project)
+
     return parser
 
 
@@ -159,7 +229,7 @@ def main(argv=None):
         args = parser.parse_args(argv)
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else 1
-    if args.command in ("save", "start", "archive") and "HQ_ROOT" not in os.environ:
+    if args.command in ("save", "start", "archive", "goal", "project") and "HQ_ROOT" not in os.environ:
         print(f"warning: HQ_ROOT is not set, writing to {hq_core.HQ_ROOT}. Run `hq init`.", file=sys.stderr)
     try:
         if hq_core.mode() == "advanced":
