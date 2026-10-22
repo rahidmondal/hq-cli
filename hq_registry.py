@@ -172,7 +172,11 @@ def finish_goal(slug: str, dropped: bool = False) -> Path:
     path = goal_readme(slug)
     if not path.is_file():
         raise HqError(f"no such goal: {slug}")
-    meta, body = hq_core.frontmatter_parse(path.read_text(encoding="utf-8"))
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        raise HqError(f"can't read {path}: {e}")
+    meta, body = hq_core.frontmatter_parse(text)
     status = "dropped" if dropped else "done"
     meta["status"] = status
     hq_core.atomic_write_text(path, hq_core.frontmatter_dump(meta, body))

@@ -56,10 +56,16 @@ def _field_problems(meta: dict, fields) -> list[str]:
     return out
 
 
+UNREADABLE = "unreadable (not UTF-8)"
+
+
 def _read(path):
+    """Text with CRLF normalized; UNREADABLE for a non-UTF-8 file; None on OSError."""
     try:
         return path.read_text(encoding="utf-8").replace("\r\n", "\n")
-    except (OSError, UnicodeDecodeError):
+    except UnicodeDecodeError:
+        return UNREADABLE
+    except OSError:
         return None
 
 
@@ -84,6 +90,9 @@ def run_checks() -> list[dict]:
         text = _read(path)
         if text is None:
             continue
+        if text is UNREADABLE:
+            add(path, UNREADABLE)
+            continue
         if not hq_core._FRONTMATTER_RE.match(text):
             add(path, "missing frontmatter")
             continue
@@ -104,6 +113,12 @@ def run_checks() -> list[dict]:
                 continue
             text = _read(readme)
             if text is None:
+                continue
+            if text is UNREADABLE:
+                add(readme, UNREADABLE)
+                continue
+            if not hq_core._FRONTMATTER_RE.match(text):
+                add(readme, "missing frontmatter")
                 continue
             meta, _ = hq_core.frontmatter_parse(text)
             st = meta.get("status")

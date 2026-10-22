@@ -342,7 +342,10 @@ def archive(slug: str, project_override: str | None = None,
     return dest
 
 
-def list_entries(project: str | None = None, status: str | None = None) -> list[dict]:
+def list_entries(project: str | None = None, status: str | None = None,
+                 tolerant: bool = False) -> list[dict]:
+    """tolerant=True (advanced callers only) lists a README that is not valid
+    UTF-8 with empty frontmatter and title = slug instead of raising."""
     projects_dir = HQ_ROOT / "projects"
     if not projects_dir.exists():
         return []
@@ -362,7 +365,13 @@ def list_entries(project: str | None = None, status: str | None = None) -> list[
                 readme = task_dir / "README.md"
                 if not readme.is_file():
                     continue
-                meta, body = frontmatter_parse(readme.read_text(encoding="utf-8"))
+                try:
+                    text = readme.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    if not tolerant:
+                        raise
+                    text = ""
+                meta, body = frontmatter_parse(text)
                 entries.append({
                     "project": proj_dir.name,
                     "slug": task_dir.name,

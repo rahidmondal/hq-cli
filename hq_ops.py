@@ -47,7 +47,7 @@ def resolve_ref(ref: str, project: str | None = None, goals: bool = True,
         goals = True
     every: list[Ref] = []
     if not goals_only:
-        for e in hq_core.list_entries(project=project):
+        for e in hq_core.list_entries(project=project, tolerant=True):
             every.append(Ref("entry", e["slug"], e["project"], e["status"], e["path"]))
     if goals:
         every.extend(_goal_refs())
@@ -75,7 +75,7 @@ def entry_records(project: str | None = None, status: str | None = None) -> list
     areas = hq_registry.goal_areas()
     registry = hq_registry.load_projects()
     records = []
-    for e in hq_core.list_entries(project=project, status=status):
+    for e in hq_core.list_entries(project=project, status=status, tolerant=True):
         try:
             meta, _ = hq_core.frontmatter_parse(e["path"].read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError):
