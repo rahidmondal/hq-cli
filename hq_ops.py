@@ -73,7 +73,10 @@ def resolve_ref(ref: str, project: str | None = None, goals: bool = True,
 
 def entry_records(project: str | None = None, status: str | None = None) -> list[dict]:
     areas = hq_registry.goal_areas()
-    registry = hq_registry.load_projects()
+    try:
+        registry = hq_registry.load_projects()
+    except HqError:
+        registry = {}  # bad projects.json: default areas; `hq check` reports the file
     records = []
     for e in hq_core.list_entries(project=project, status=status, tolerant=True):
         try:
@@ -132,7 +135,9 @@ def set_field(ref: str, field: str, value: str, project: str | None = None) -> P
     r = resolve_ref(ref, project=project)
     allowed = hq_fields.GOAL_SET_FIELDS if r.kind == "goal" else hq_fields.ENTRY_SET_FIELDS
     if field not in allowed:
-        raise HqError(f"can't set '{field}' on a {_noun(r)} (allowed: {', '.join(allowed)})")
+        noun = _noun(r)
+        article = "an" if noun[0] in "aeiou" else "a"
+        raise HqError(f"can't set '{field}' on {article} {noun} (allowed: {', '.join(allowed)})")
     clear = str(value).strip().lower() == "none"
     new = None if clear else hq_fields.normalize(field, value)
     if field == "goal" and new is not None and hq_registry.get_goal(new) is None:
@@ -205,7 +210,8 @@ def show(ref: str, project: str | None = None, log_limit: int = 10) -> dict:
         if record is None:
             raise HqError(f"can't read {r.path}")
         lines = [e for e in hq_core.read_log()
-                 if (e.get("slug") == r.slug and not e.get("project")) or e.get("goal") == r.slug]
+                 if e.get("goal") == r.slug
+                 or (e.get("action") == "goal" and e.get("slug") == r.slug)]
         tasks = [{"project": t["project"], "status": t["status"], "slug": t["slug"],
                   "title": t["title"], "blocked": t["blocked"]}
                  for t in entry_records() if t["goal"] == r.slug]

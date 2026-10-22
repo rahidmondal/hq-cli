@@ -14,14 +14,14 @@ AREAS = ("work", "personal")
 ENTRY_SET_FIELDS = ("priority", "due", "do-on", "est", "goal", "area")
 GOAL_SET_FIELDS = ("priority", "target", "area")
 
-_ISO_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
-_REL_RE = re.compile(r"\A\+(\d+)([dw])\Z")
-_EST_RE = re.compile(r"\A(?:(\d+)h)?(?:(\d+)m)?\Z")
+_ISO_RE = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
+_REL_RE = re.compile(r"\A\+([0-9]+)([dw])\Z")
+_EST_RE = re.compile(r"\A(?:([0-9]+)h)?(?:([0-9]+)m)?\Z")
 
 
 def parse_priority(s: str) -> str:
     t = str(s).strip().upper()
-    if t.isdigit():
+    if t.isascii() and t.isdigit():
         t = "P" + t
     if t not in PRIORITIES:
         raise HqError(f"bad priority {s!r} (use P1-P4)")
@@ -62,7 +62,7 @@ def parse_date(s: str, today=None) -> str:
 def parse_est(s: str) -> int:
     t = str(s).strip().lower()
     minutes = None
-    if t.isdigit():
+    if t.isascii() and t.isdigit():
         minutes = int(t)
     else:
         m = _EST_RE.match(t)

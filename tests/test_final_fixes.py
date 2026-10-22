@@ -118,5 +118,102 @@ class UnreadableReadmeTests(AdvancedBase):
             run_cli(["list"])
 
 
+class UnicodeDigitTests(AdvancedBase):
+    """Item 4: only ASCII digits are numbers in est/priority."""
+
+    def test_stored_superscript_est_does_not_crash(self):
+        self.ok("save", "task", "t", "--project", "p")
+        f = hq_core.task_path("p", "planning", "t") / "README.md"
+        f.write_text(f.read_text(encoding="utf-8").replace("tags: []", "tags: []\nest: ²"),
+                     encoding="utf-8")
+        recs = [json.loads(l) for l in self.ok("list", "--json").splitlines()]
+        self.assertIsNone(recs[0]["est"])
+        self.assertIsNone(json.loads(self.ok("show", "t", "--json"))["record"]["est"])
+        self.ok("show", "t")
+
+    def test_save_and_set_reject_unicode_digits(self):
+        code, _, err = run_cli(["save", "task", "t", "--project", "p", "--est", "²"])
+        self.assertEqual(code, 1)
+        self.assertIn("bad estimate", err)
+        self.ok("save", "task", "t", "--project", "p")
+        for field, value, msg in (("est", "①", "bad estimate"),
+                                  ("est", "²h", "bad estimate"),
+                                  ("priority", "²", "bad priority")):
+            code, _, err = run_cli(["set", "t", field, value])
+            self.assertEqual(code, 1, (field, value))
+            self.assertIn(msg, err)
+
+
+class RecordRepoTests(AdvancedBase):
+    """Item 5: a bad projects.json must not turn a completed save into a failure."""
+
+    def setUp(self):
+        super().setUp()
+        p = hq_core.HQ_ROOT / ".hq" / "projects.json"
+        p.write_text("{not json", encoding="utf-8")
+
+    def test_save_warns_but_succeeds(self):
+        from pathlib import Path
+        from unittest import mock
+        with mock.patch("hq_core.detect_repo_root", return_value=Path("/x/repo")), \
+                mock.patch("hq_core.detect_project", return_value="repo"):
+            code, out, err = run_cli(["save", "task", "T"])
+        self.assertEqual(code, 0, err)
+        readme = hq_core.task_path("repo", "planning", "t") / "README.md"
+        self.assertEqual(out.strip(), str(readme))
+        self.assertIn("warning: could not record repo:", err)
+        self.assertTrue(readme.is_file())
+
+    def test_list_and_show_ignore_bad_projects_file(self):
+        self.ok("save", "task", "t", "--project", "personal")
+        recs = [json.loads(l) for l in self.ok("list", "--json").splitlines()]
+        self.assertEqual(recs[0]["area"], "personal")
+        self.ok("list")
+        self.ok("show", "t")
+        code, out, _ = run_cli(["check"])
+        self.assertIn("projects.json is not valid JSON", out)
+
+
+class MinorFixTests(AdvancedBase):
+    def setUp(self):
+        super().setUp()
+        self.ok("save", "task", "t", "--project", "p")
+
+    def test_block_dash_is_quoted_and_round_trips(self):
+        """Item 6."""
+        self.ok("block", "t", "-")
+        text = (hq_core.task_path("p", "planning", "t") / "README.md").read_text(encoding="utf-8")
+        self.assertIn('blocked: "-"\n', text)
+        self.assertEqual(hq_core.yaml_scalar("-"), '"-"')
+        self.assertEqual(json.loads(self.ok("show", "t", "--json"))["record"]["blocked"], "-")
+
+    def test_set_error_uses_correct_article(self):
+        """Item 7."""
+        code, _, err = run_cli(["set", "t", "title", "x"])
+        self.assertEqual(code, 1)
+        self.assertIn("can't set 'title' on an entry", err)
+        self.ok("goal", "new", "G")
+        code, _, err = run_cli(["set", "goal/g", "due", "today"])
+        self.assertEqual(code, 1)
+        self.assertIn("can't set 'due' on a goal", err)
+
+    def test_goal_show_order_files_log_tasks(self):
+        """Item 8."""
+        self.ok("goal", "new", "G")
+        self.ok("set", "t", "goal", "g")
+        (hq_core.HQ_ROOT / "goals" / "g" / "notes.txt").write_text("x", encoding="utf-8")
+        out = self.ok("show", "goal/g").splitlines()
+        idx = [out.index(h) for h in ("files:", "log:", "tasks:")]
+        self.assertEqual(idx, sorted(idx))
+
+    def test_goal_show_log_only_matches_goal_lines(self):
+        """Item 9."""
+        self.ok("goal", "new", "kb")
+        self.ok("save", "learning", "kb")
+        self.ok("note", "goal/kb", "hello")
+        log = json.loads(self.ok("show", "goal/kb", "--json"))["log"]
+        self.assertEqual([e["action"] for e in log], ["goal", "note"])
+
+
 if __name__ == "__main__":
     unittest.main()

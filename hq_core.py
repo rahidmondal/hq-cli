@@ -70,6 +70,7 @@ def yaml_scalar(value: str) -> str:
         or value.endswith(":")
         or value.startswith(_YAML_BAD_START)
         or value.startswith("- ")
+        or value == "-"
         or value != value.strip()
         or value.lower() in _YAML_RESERVED
     )

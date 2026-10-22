@@ -58,7 +58,10 @@ def cmd_save(args):
         if repo is not None:
             import hq_registry
 
-            hq_registry.record_repo(path.parent.parent.parent.name, repo)
+            try:
+                hq_registry.record_repo(path.parent.parent.parent.name, repo)
+            except HqError as e:  # the entry is already saved; don't report failure
+                print(f"warning: could not record repo: {e}", file=sys.stderr)
     print(path)
 
 
@@ -217,15 +220,15 @@ def cmd_show(args):
         print("files:")
         for f in data["files"]:
             print(f"  {f}")
+    if data["log"]:
+        print("log:")
+        for e in data["log"]:
+            print(f"  {_log_line(e)}")
     if "tasks" in data:
         print("tasks:")
         for t in data["tasks"]:
             flag = " [blocked]" if t["blocked"] else ""
             print(f"  {t['project']}/{t['status']}/{t['slug']}  {t['title']}{flag}")
-    if data["log"]:
-        print("log:")
-        for e in data["log"]:
-            print(f"  {_log_line(e)}")
 
 
 def cmd_set(args):

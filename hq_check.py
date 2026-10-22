@@ -8,7 +8,7 @@ import hq_fields
 import hq_registry
 from hq_core import HqError
 
-_STRICT_DATE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
+_STRICT_DATE = re.compile(r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 _BAD = (HqError, ValueError, TypeError, AttributeError, OverflowError)
 
 
