@@ -220,7 +220,9 @@ def bundle(day: datetime.date, with_git: bool = True) -> dict:
         "reading": reading,
         "inbox": inbox,
         "commits": commits(day, day) if with_git else [],
-        "events": [{k: o[k] for k in ("title", "time", "end_time", "area", "id")} for o in events],
+        "events": [{k: o.get(k) for k in ("title", "time", "end_time", "area", "id", "start", "end",
+                                          "repeat", "until", "all_day", "span_days", "notes")}
+                   for o in events],
         "lines": flat,
     }
 

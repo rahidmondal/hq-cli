@@ -334,7 +334,11 @@ def cmd_cal(args):
 
     if args.cal_cmd == "add":
         print(hq_items.add_event(args.title, args.start, args.end, repeat=args.repeat,
-                                 area=args.area, notes=args.notes))
+                                 area=args.area, notes=args.notes, until=args.until))
+    elif args.cal_cmd == "set":
+        print(hq_items.edit_event(args.ref, title=args.title, start=args.start, end=args.end,
+                                  repeat=args.repeat, until=args.until, area=args.area,
+                                  notes=args.notes))
     elif args.cal_cmd == "list":
         start = datetime.date.fromisoformat(hq_fields.parse_date(args.date)) if args.date \
             else datetime.date.today()
@@ -350,7 +354,8 @@ def cmd_cal(args):
         print(hq_term.table(
             ("DATE", "TIME", "AREA", "REF", "TITLE", "REPEAT"),
             [(o["date"], f"{o['time']}–{o['end_time']}" if o["time"] else "all day",
-              AREA_SHORT.get(o["area"], "·"), o["id"], o["title"], o["repeat"] or "")
+              AREA_SHORT.get(o["area"], "·"), o["id"], o["title"],
+              (o["repeat"] or "") + (f" until {o['until']}" if o.get("until") else ""))
              for o in items], flex=4))
     elif args.cal_cmd == "rm":
         e = hq_items.remove_event(args.ref)
@@ -461,6 +466,16 @@ def register(sub) -> None:
     c.add_argument("start", help="YYYY-MM-DD HH:MM, today 10:00, +1d 9:30, HH:MM, or a date for all day")
     c.add_argument("end", nargs="?", help="HH:MM, a duration (30m, 1h) or a full time; default 30m")
     c.add_argument("--repeat", choices=("daily", "weekdays", "weekly"))
+    c.add_argument("--until", help="last day of a repeating event")
+    c.add_argument("--area")
+    c.add_argument("--notes")
+    c = csub.add_parser("set", help="change an event (none clears repeat, until, area, notes)")
+    c.add_argument("ref")
+    c.add_argument("--title")
+    c.add_argument("--start", help="new start; the length is kept unless --end is given")
+    c.add_argument("--end")
+    c.add_argument("--repeat", choices=("daily", "weekdays", "weekly", "none"))
+    c.add_argument("--until")
     c.add_argument("--area")
     c.add_argument("--notes")
     c = csub.add_parser("list", help="list events")

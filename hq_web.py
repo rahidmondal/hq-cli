@@ -249,9 +249,12 @@ def argv_for(body: dict) -> list[str]:
         keys = ("project", "priority", "due", "do_on", "est", "area", "target", "goal_ref")
         return ["triage", *_opts(body, keys), "--", _text(body, "ref"), to]
     if action == "cal_add":
-        opts = _opts(body, ("repeat", "area", "notes"))
+        opts = _opts(body, ("repeat", "until", "area", "notes"))
         end = _text(body, "end", required=False)
         return ["cal", "add", *opts, "--", _text(body, "title"), _text(body, "start"), *([end] if end else [])]
+    if action == "cal_set":
+        return ["cal", "set", *_opts(body, ("title", "start", "end", "repeat", "until", "area")),
+                "--", _text(body, "ref")]
     if action == "cal_rm":
         return ["cal", "rm", "--", _text(body, "ref")]
     if action == "day_end":

@@ -352,11 +352,16 @@ def event_view(path: Path) -> dict | None:
         return None
     repeat = meta.get("repeat") if meta.get("repeat") in REPEATS else None
     title = str(meta.get("title") or hq_core.extract_title(body) or path.stem)
+    try:
+        until = datetime.date.fromisoformat(str(meta.get("until"))).isoformat() if meta.get("until") else None
+    except ValueError:
+        until = None
     return {
         "type": "event", "slug": path.stem, "id": str(meta.get("id") or path.stem),
         "title": title, "start": start, "end": end or start,
         "all_day": len(start) == 10, "span_days": (eday - sday).days,
-        "repeat": repeat, "source": meta.get("source") or "hq", "area": _area(meta),
+        "repeat": repeat, "until": until if repeat else None,
+        "source": meta.get("source") or "hq", "area": _area(meta),
         "notes": body.strip(), "path": path,
     }
 
@@ -373,6 +378,8 @@ def _repeats_on(e: dict, day: datetime.date) -> bool:
         return False
     if day == first:
         return True
+    if e.get("until") and day.isoformat() > e["until"]:
+        return False
     if e["repeat"] == "daily":
         return True
     if e["repeat"] == "weekdays":
@@ -405,7 +412,8 @@ def occurrences(start: datetime.date, end: datetime.date, area: str | None = Non
 
 
 def add_event(title: str, start: str, end: str | None = None, repeat: str | None = None,
-              area: str | None = None, notes: str | None = None, source: str = "hq") -> Path:
+              area: str | None = None, notes: str | None = None, source: str = "hq",
+              until: str | None = None) -> Path:
     title = _one_line(title or "")
     if not title:
         raise HqError("event title is empty")
@@ -413,16 +421,114 @@ def add_event(title: str, start: str, end: str | None = None, repeat: str | None
         raise HqError(f"bad repeat {repeat!r} (use {', '.join(REPEATS)})")
     area = hq_fields.parse_area(area) if area else None
     s, e = parse_span(start, end)
+    until = _until(until, repeat, s)
     eid = secrets.token_hex(4)
     path = _free_path(_dir("event"), f"{s[:10]}-{eid}")
     meta = {"kind": "event", "id": eid, "title": title, "start": s, "end": e,
             "repeat": repeat or "", "source": source}
+    if until:
+        meta["until"] = until
     if area:
         meta["area"] = area
     meta["updated"] = _now_local()
     _write(path, meta, f"{notes.strip()}\n" if notes and notes.strip() else "")
     hq_core.log_action("event", op="add", id=eid, title=title, start=s)
     return path
+
+
+def _until(value: str | None, repeat: str | None, start: str) -> str | None:
+    if not value:
+        return None
+    if not repeat:
+        raise HqError("--until only applies to a repeating event")
+    until = hq_fields.parse_date(value)
+    if until < start[:10]:
+        raise HqError(f"until {until} is before the event starts ({start[:10]})")
+    return until
+
+
+def _span_minutes(start: str, end: str) -> int:
+    if len(start) == 10:
+        return 0
+    a = datetime.datetime.fromisoformat(start)
+    b = datetime.datetime.fromisoformat(end) if len(end) > 10 else a
+    return int((b - a).total_seconds() // 60)
+
+
+EVENT_FIELDS = ("title", "start", "end", "repeat", "until", "area", "notes")
+
+
+def edit_event(ref: str, **changes) -> Path:
+    """Change an event. Keys: title, start, end, repeat, until, area, notes.
+    The value "none" clears repeat, until, area and notes. A new start without
+    a new end keeps the event's length. Logged once with the fields changed."""
+    changes = {k: v for k, v in changes.items() if v is not None}
+    unknown = set(changes) - set(EVENT_FIELDS)
+    if unknown:
+        raise HqError(f"can't set {', '.join(sorted(unknown))} on an event")
+    if not changes:
+        raise HqError("nothing to change (use --title, --start, --end, --repeat, --until, --area or --notes)")
+    path = resolve("event", ref)
+    meta, body = _read(path)
+    old = event_view(path)
+    if old is None:
+        raise HqError(f"can't read {path}")
+    none = lambda v: str(v).strip().lower() == "none"
+    if "title" in changes:
+        title = _one_line(changes["title"])
+        if not title:
+            raise HqError("event title is empty")
+        meta["title"] = title
+    start, end = old["start"], old["end"]
+    if "start" in changes and _parse_time(str(changes["start"])):
+        changes["start"] = f"{start[:10]} {changes['start']}"  # a bare time keeps the event's day
+    if "start" in changes or "end" in changes:
+        if "start" in changes and "end" not in changes:
+            s, _ = parse_span(changes["start"], None)
+            minutes = _span_minutes(start, end)
+            if len(s) == 10:
+                e = (datetime.date.fromisoformat(s) + datetime.timedelta(days=old["span_days"])).isoformat() \
+                    if len(start) == 10 else s
+            else:
+                e = (datetime.datetime.fromisoformat(s) + datetime.timedelta(minutes=minutes or 30)) \
+                    .strftime("%Y-%m-%dT%H:%M")
+        else:
+            base = changes.get("start") or (start.replace("T", " ") if len(start) > 10 else start)
+            s, e = parse_span(base, changes["end"])
+        meta["start"], meta["end"] = s, e
+    repeat = meta.get("repeat") if meta.get("repeat") in REPEATS else None
+    if "repeat" in changes:
+        repeat = None if none(changes["repeat"]) else changes["repeat"]
+        if repeat and repeat not in REPEATS:
+            raise HqError(f"bad repeat {repeat!r} (use {', '.join(REPEATS)} or none)")
+        meta["repeat"] = repeat or ""
+    if "until" in changes:
+        until = None if none(changes["until"]) else _until(changes["until"], repeat, meta["start"])
+        if until:
+            meta["until"] = until
+        else:
+            meta.pop("until", None)
+    elif not repeat:
+        meta.pop("until", None)
+    elif meta.get("until"):
+        _until(meta["until"], repeat, meta["start"])  # a moved start must not pass the end date
+    if "area" in changes:
+        if none(changes["area"]):
+            meta.pop("area", None)
+        else:
+            meta["area"] = hq_fields.parse_area(changes["area"])
+    if "notes" in changes:
+        body = "" if none(changes["notes"]) else changes["notes"].strip() + "\n"
+    meta["updated"] = _now_local()
+    dest = path
+    if meta["start"][:10] != path.stem[:10]:
+        dest = _free_path(path.parent, f"{meta['start'][:10]}-{meta.get('id') or path.stem[11:]}")
+    _write(dest, meta, body)
+    if dest != path:
+        path.unlink()
+    hq_core.log_action("event", op="set", id=str(meta.get("id") or dest.stem), title=meta.get("title"),
+                       fields=sorted(changes))
+    return dest
 
 
 def remove_event(ref: str) -> dict:
@@ -473,7 +579,11 @@ def export_ics() -> tuple[Path, int]:
                   _ics_dt(e["start"], "DTSTART"), _ics_dt(e["end"], "DTEND", end=True),
                   f"SUMMARY:{_ics_text(e['title'])}"]
         if e["repeat"]:
-            lines.append(f"RRULE:{_RRULE[e['repeat']]}")
+            rule = _RRULE[e["repeat"]]
+            if e.get("until"):
+                stamp_until = e["until"].replace("-", "")
+                rule += f";UNTIL={stamp_until}" if e["all_day"] else f";UNTIL={stamp_until}T235959"
+            lines.append(f"RRULE:{rule}")
         if e["notes"]:
             lines.append(f"DESCRIPTION:{_ics_text(e['notes'])}")
         lines.append("END:VEVENT")

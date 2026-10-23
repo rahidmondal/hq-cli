@@ -226,6 +226,25 @@ class CalendarViewTests(ServerCase):
         _, cal = self.get_json("/api/calendar?month=2026-02")
         self.assertEqual((cal["timeline"]["start"], cal["timeline"]["end"]), ("2026-02-01", "2026-02-28"))
 
+    def test_event_edit_and_reading_time(self):
+        self.post({"action": "cal_add", "title": "Sync", "start": "today 10:00", "end": "30m",
+                   "repeat": "daily", "until": "+5d"})
+        _, day = self.get_json("/api/day?date=today")
+        ev = day["events"][0]
+        self.assertEqual((ev["repeat"], ev["start"][11:]), ("daily", "10:00"))
+        status, out = self.post({"action": "cal_set", "ref": ev["id"], "title": "-Sync", "start": "11:00",
+                                 "repeat": "none", "until": "none", "area": "work"})
+        self.assertEqual(status, 200, out)
+        _, day = self.get_json("/api/day?date=today")
+        ev = day["events"][0]
+        self.assertEqual((ev["title"], ev["time"], ev["end_time"], ev["repeat"], ev["area"]),
+                         ("-Sync", "11:00", "11:30", None, "work"))
+        self.post({"action": "read_add", "url": "https://e.com/r", "title": "R"})
+        status, out = self.post({"action": "read_set", "ref": "r", "field": "est", "value": "25m"})
+        self.assertEqual(status, 200, out)
+        _, state = self.get_json("/api/state")
+        self.assertEqual(state["reading"][0]["est"], 25)
+
     def test_theme_switch_is_in_the_page(self):
         _, raw = self.request("GET", "/")
         self.assertIn(b'data-act="theme"', raw)

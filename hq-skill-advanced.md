@@ -39,7 +39,7 @@ AI and works without you: you make it faster and add context it can't reach.
 | "what should I read?" | `hq read list --json`; mark with `hq --by agent read done <ref>` or `read drop <ref>` |
 | "note this idea" / "remind me …" | `hq --by agent dump "<text>"`; sort later with `hq --by agent triage <ref> task\|goal\|reading\|drop [--project X]` |
 | "new goal …" | `hq --by agent goal new "<title>" --area work [--target D] [--priority P]`; `hq goal list --json`; `hq --by agent goal done <ref>` |
-| "add a meeting …" | `hq --by agent cal add "<title>" "<YYYY-MM-DD HH:MM>" <end or 30m> [--repeat daily\|weekdays\|weekly]`; `hq cal list --json` |
+| "add a meeting …" | `hq --by agent cal add "<title>" "<YYYY-MM-DD HH:MM>" <end or 30m> [--repeat daily\|weekdays\|weekly]`; `hq cal list --json`; move or rename with `hq --by agent cal set <ref> --start ... --title ...` |
 | "save this file with the task" | `hq --by agent artifact add <ref> <file> --about "<what>" --why "<why>"` (ask for both) |
 | "wrap up my day" | the day-end recipe below |
 | "what did I do this week / last week?" | `hq week [DATE] --json`, `hq month [DATE] --json`, `hq day <DATE> --json` |

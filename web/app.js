@@ -455,7 +455,9 @@ function readRow(i) {
   return `<div class="row item reading${i.status !== "unread" ? " closed" : ""}" data-reading="${esc(i.slug)}" data-t="${esc(searchText(i) + " " + i.url.toLowerCase())}">
     ${prioSelect(i, i.status !== "unread" ? "disabled" : "")}
     <a class="main" href="${esc(safeUrl(i.url))}" target="_blank" rel="noopener noreferrer"><div class="title">${esc(i.title)}<span class="ext" aria-hidden="true">↗</span></div><div class="sub">${sub}</div></a>
-    <div class="meta"><span class="when">${esc(when)}</span>${i.est_label ? `<span class="est">${esc(i.est_label)}</span>` : ""}</div>
+    <div class="meta"><span class="when">${esc(when)}</span>${i.status === "unread"
+      ? `<input class="estin" data-set="est" value="${esc(i.est_label || "")}" placeholder="time?" aria-label="Reading time" title="Reading time, e.g. 12m">`
+      : i.est_label ? `<span class="est">${esc(i.est_label)}</span>` : ""}</div>
     <div class="acts">${acts}</div>
   </div>`;
 }
@@ -720,6 +722,14 @@ function selectCtl(name, options, value, extra = "") {
     `<option value="${esc(v)}"${v === (value ?? "") ? " selected" : ""}>${esc(label)}</option>`).join("")}</select>`;
 }
 
+function artifactsHtml(e, folder) {
+  const arts = e.artifacts || e.files.map((f) => ({ file: f }));
+  return arts.length ? `<h3>Files</h3><ul class="artlist">${arts.map((a) => `<li>
+      ${a.missing ? `<span class="reason">${esc(a.file)} (missing)</span>`
+        : `<a class="fullpage" href="${esc(folder + enc(a.file) + (a.dir ? "/" : ""))}" target="_blank" rel="noopener">${esc(a.file)}</a>`}
+      ${a.about ? `<span class="art-about">${esc(a.about)}</span><span class="art-why">Why: ${esc(a.why || "")}</span>` : ""}</li>`).join("")}</ul>` : "";
+}
+
 function entryDrawer(e) {
   const r = e.record;
   const goals = S.data.goals.filter((g) => g.status === "active" || g.slug === r.goal);
@@ -733,8 +743,7 @@ function entryDrawer(e) {
     `<button class="btn danger" data-do="drop">Drop</button>`,
   ].join("");
   const folder = r.href.replace(/README\.md$/, "");
-  const files = e.files.length ? `<h3>Files</h3><div class="sub" style="display:flex;flex-wrap:wrap;gap:.3rem .8rem">${e.files
-    .map((f) => `<a class="fullpage" href="${esc(folder + enc(f))}" target="_blank" rel="noopener">${esc(f)}</a>`).join("")}</div>` : "";
+  const files = artifactsHtml(e, folder);
   return `<div data-project="${esc(r.project)}" data-slug="${esc(r.slug)}">
     <div class="top"><h2>${esc(r.title)}</h2><button class="btn quiet" data-do="close" aria-label="Close">Close</button></div>
     <div class="where">${esc(r.project)}, ${esc(statusText)}${r.kind && r.kind !== "task" ? `, ${esc(r.kind)}` : ""}, created ${esc(r.created)}</div>
@@ -779,6 +788,7 @@ function goalDrawer(e) {
     }).join("") : `<p class="sub" style="color:var(--muted)">No tasks in this goal yet. Pick this goal in a task's details, or add one here.</p>`}</div>
     <form class="notebox" data-form="note" style="margin-top:1.2rem"><input name="text" placeholder="Add a note to the log" required><button class="btn">Add note</button></form>
     <h3>Activity</h3>${logList(e.log)}
+    ${artifactsHtml(e, (e.href || "").replace(/README\.md$/, ""))}
     <h3>Notes</h3><div class="md"></div>
   </div>`;
 }
@@ -790,7 +800,9 @@ function dayDrawer(d) {
   const bits = [["finished", c.finished], ["started", c.started], ["dropped", c.dropped], ["blocked", c.blocked],
     ["commits", c.commits], ["notes", c.notes]].filter(([, n]) => n).map(([k, n]) => `${n} ${k}`);
   const events = d.events.length ? d.events.map((e) => `<li><span>${esc(e.time ? `${e.time}–${e.end_time}` : "all day")}</span>
-      <span>${esc(e.title)}</span><button class="btn small quiet" data-do="event-rm" data-event="${esc(e.id)}" title="Remove this event">Remove</button></li>`).join("")
+      <span>${esc(e.title)}${e.repeat ? `<em class="rep">${esc(e.repeat)}${e.until ? ` until ${esc(shortDate(e.until))}` : ""}</em>` : ""}</span>
+      <span class="evacts"><button class="btn small quiet" data-do="event-edit" data-event="${esc(e.id)}">Edit</button>
+      <button class="btn small quiet" data-do="event-rm" data-event="${esc(e.id)}" title="Remove this event">Remove</button></span></li>`).join("")
     : `<li class="none">No events.</li>`;
   const repeats = [["", "Once"], ...S.data.fields.repeats.map((r) => [r, r[0].toUpperCase() + r.slice(1)])];
   const saved = d.saved;
@@ -829,6 +841,7 @@ async function openDrawer(ref, quiet = false) {
   }
   const scrollTop = drawer.scrollTop;
   S.drawer = ref;
+  S.dayData = ref.day ? e : null;
   drawer.innerHTML = ref.day ? dayDrawer(e) : ref.goal ? goalDrawer(e) : entryDrawer(e);
   const md = ref.day ? null : drawer.querySelector(".md");
   if (md && window.marked) md.innerHTML = e.body.trim() ? marked.parse(e.body) : `<p style="color:var(--muted)">No notes in this file.</p>`;
@@ -900,11 +913,36 @@ function openNewEvent(date) {
       <div class="field"><label>Start</label><input type="time" name="start" title="Leave empty for all day"></div>
       <div class="field"><label>End</label><input type="time" name="end"></div>
       <div class="field"><label>Repeat</label>${selectCtl("repeat", repeats, "", 'name="repeat"')}</div>
+      <div class="field"><label>Until</label><input type="date" name="until" title="Last day of a repeating event"></div>
       <div class="field"><label>Area</label>${selectCtl("area", [["", "Any"], ...d.fields.areas.map((a) => [a, a[0].toUpperCase() + a.slice(1)])], S.area, 'name="area"')}</div>
     </div>
-    <p class="quiet">Leave the start empty for an all-day event. With no end, it lasts 30 minutes.</p>
+    <p class="quiet">Leave the start empty for an all-day event. With no end, it lasts 30 minutes. "Until" only applies to a repeating event.</p>
     <p class="err"></p>
     <div class="foot"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="save">Add event</button></div>
+  </form>`;
+  dialog.showModal();
+  dialog.querySelector("[name=title]").focus();
+}
+
+function openEditEvent(ev) {
+  const d = S.data;
+  const repeats = [["none", "Doesn't repeat"], ...d.fields.repeats.map((r) => [r, r[0].toUpperCase() + r.slice(1)])];
+  const startTime = ev.all_day ? "" : (ev.start || "").slice(11, 16);
+  const endTime = ev.all_day ? "" : (ev.end || "").slice(11, 16);
+  dialog.innerHTML = `<form method="dialog" data-form="edit-event" data-ref="${esc(ev.id)}" data-span="${esc(ev.span_days || 0)}">
+    <h2>Edit event</h2>
+    <input class="titlein" name="title" value="${esc(ev.title)}" required autocomplete="off">
+    <div class="fields">
+      <div class="field"><label>${ev.repeat ? "Starts" : "Date"}</label><input type="date" name="date" value="${esc((ev.start || "").slice(0, 10))}" required></div>
+      <div class="field"><label>Start</label><input type="time" name="start" value="${esc(startTime)}" title="Leave empty for all day"></div>
+      <div class="field"><label>End</label><input type="time" name="end" value="${esc(endTime)}"></div>
+      <div class="field"><label>Repeat</label>${selectCtl("repeat", repeats, ev.repeat || "none", 'name="repeat"')}</div>
+      <div class="field"><label>Until</label><input type="date" name="until" value="${esc(ev.until || "")}"></div>
+      <div class="field"><label>Area</label>${selectCtl("area", [["none", "Any"], ...d.fields.areas.map((a) => [a, a[0].toUpperCase() + a.slice(1)])], ev.area || "none", 'name="area"')}</div>
+    </div>
+    <p class="quiet">${ev.repeat ? "Changes apply to every day this event repeats." : "Leave the start empty for an all-day event."}</p>
+    <p class="err"></p>
+    <div class="foot"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="save">Save changes</button></div>
   </form>`;
   dialog.showModal();
   dialog.querySelector("[name=title]").focus();
@@ -938,7 +976,7 @@ function openTriageTask(slug) {
 function eventBody(data, date) {
   const start = data.start ? `${date} ${data.start}` : date;
   const end = data.start ? data.end : "";
-  return { action: "cal_add", title: data.title, start, end, repeat: data.repeat, area: data.area };
+  return { action: "cal_add", title: data.title, start, end, repeat: data.repeat, until: data.until, area: data.area };
 }
 
 dialog.addEventListener("submit", async (ev) => {
@@ -953,6 +991,14 @@ dialog.addEventListener("submit", async (ev) => {
     ok = await cmd({ action: "save", ...data }, "Orders issued");
   } else if (form.dataset.form === "new-event") {
     ok = await cmd(eventBody(data, data.date), "On the schedule");
+  } else if (form.dataset.form === "edit-event") {
+    const span = Number(form.dataset.span) || 0;
+    const start = data.start ? `${data.date} ${data.start}` : data.date;
+    let end = data.end;
+    if (!data.start) { const e = parseISO(data.date); e.setDate(e.getDate() + span); end = isoOf(e); }
+    else if (!data.end) end = "30m";
+    ok = await cmd({ action: "cal_set", ref: form.dataset.ref, title: data.title, start, end,
+      repeat: data.repeat, until: data.repeat === "none" ? "none" : (data.until || "none"), area: data.area }, "Orders updated");
   } else if (form.dataset.form === "triage-task") {
     localStorage.setItem("hq.project", data.project);
     ok = await cmd({ action: "triage", ref: form.dataset.ref, ...data }, "Orders issued");
@@ -1003,6 +1049,10 @@ async function doAction(what, ref, btn) {
     return;
   }
   if (ref.day) {
+    if (what === "event-edit") {
+      const ev = S.dayData?.events.find((x) => x.id === btn.dataset.event);
+      return ev && openEditEvent(ev);
+    }
     if (what === "event-rm") {
       const e = btn.dataset.event;
       if (!confirm("Remove this event? A repeating event is removed from every day.")) return;
@@ -1092,7 +1142,8 @@ document.addEventListener("change", (ev) => {
   if (!ref) return;
   const field = el.dataset.set;
   const value = el.value.trim() || "none";
-  if (ref.reading) return cmd({ action: "read_set", ref: ref.reading, field, value }, "Priority set");
+  if (ref.reading) return cmd({ action: "read_set", ref: ref.reading, field, value },
+    field === "est" ? (value === "none" ? "Reading time cleared" : "Reading time set") : "Priority set");
   const label = field === "do-on" ? "Do-on date" : field[0].toUpperCase() + field.slice(1);
   cmd({ action: "set", field, value, ...(ref.goal ? { goal: ref.goal } : ref) },
     value === "none" ? `${label} cleared` : `${label} set`);

@@ -402,3 +402,37 @@ class UntrustedTextTests(Adv):
         facts = hq_day.facts_markdown(hq_day.bundle(datetime.date.today(), with_git=False))
         self.assertIn("&lt;b&gt;bold&lt;/b&gt; &amp; co", facts)
         self.assertNotIn("<b>", facts)
+
+
+class EventEditTests(Adv):
+    def test_until_stops_a_repeating_event(self):
+        hq_items.add_event("Standup", "2026-10-19 10:00", "15m", repeat="weekdays", until="2026-10-21")
+        days = [o["date"] for o in hq_items.occurrences(datetime.date(2026, 10, 19), datetime.date(2026, 10, 30))]
+        self.assertEqual(days, ["2026-10-19", "2026-10-20", "2026-10-21"])
+        self.assertIn("until only applies", self.fails("cal", "add", "One-off", "2026-10-19", "--until", "2026-10-30"))
+        self.assertIn("before the event starts", self.fails("cal", "add", "X", "2026-10-19 9:00", "--repeat", "daily",
+                                                            "--until", "2026-10-01"))
+
+    def test_cal_set_keeps_length_moves_file_and_clears(self):
+        self.ok("cal", "add", "Review", "2026-10-23 15:00", "16:30", "--repeat", "weekly", "--until", "2026-11-30",
+                "--area", "work")
+        self.ok("cal", "set", "review", "--start", "17:00")
+        e = hq_items.list_events()[0]
+        self.assertEqual((e["start"], e["end"]), ("2026-10-23T17:00", "2026-10-23T18:30"))
+        path = Path(self.ok("cal", "set", "review", "--start", "2026-10-26 09:00", "--title", "Weekly review").strip())
+        self.assertTrue(path.name.startswith("2026-10-26-"))
+        self.assertEqual(len(hq_items._files("event")), 1)
+        self.ok("cal", "set", "weekly", "--until", "none", "--area", "none")
+        e = hq_items.list_events()[0]
+        self.assertEqual((e["title"], e["until"], e["area"], e["end"]),
+                         ("Weekly review", None, None, "2026-10-26T10:30"))
+        self.ok("cal", "set", "weekly", "--repeat", "none")
+        self.assertIsNone(hq_items.list_events()[0]["repeat"])
+        self.assertIn("nothing to change", self.fails("cal", "set", "weekly"))
+        line = hq_core.read_log()[-1]
+        self.assertEqual((line["action"], line["op"], line["fields"]), ("event", "set", ["repeat"]))
+
+    def test_ics_until(self):
+        hq_items.add_event("Gym", "2026-10-19 07:00", "1h", repeat="daily", until="2026-10-25")
+        hq_items.export_ics()
+        self.assertIn("RRULE:FREQ=DAILY;UNTIL=20261025T235959", (hq_core.HQ_ROOT / "calendar.ics").read_text(encoding="utf-8"))
