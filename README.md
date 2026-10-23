@@ -123,7 +123,40 @@ classic mode print `hq: '<cmd>' needs advanced mode` and exit 1.
 | `hq goal list` | `--status active\|done\|dropped`, `--area A`, `--json` | List goals. |
 | `hq goal done <ref>` | `--dropped` | Close a goal. |
 | `hq project set <project> area <area>` | | Set a project's default area (stored in `.hq/projects.json`). |
-| `hq check` | `--json` | Scan the archive for problems. |
+| `hq check` | `--json` | Scan the archive for problems: bad fields, unknown goals, missing artifacts, inbox items older than 14 days, sync-conflict copies. |
+| `hq today` | `--area A`, `--json` | What needs you today (see below). |
+| `hq free [TIME]` | `--area A`, `--json` | Tasks and reading whose estimate fits in `TIME` (`30m`, `1h`). With no time: until your next event, else 30 minutes. |
+| `hq read <url>` | `--priority P`, `--note T`, `--mins N`, `--area A`, `--title T`, `--offline` | Save a link to the reading list. hq fetches the page's title and estimates reading time (~230 words a minute); `--offline` or `"fetch": false` in `.hq/config.json` skips that. |
+| `hq read list` / `done <ref>` / `drop <ref>` / `set <ref> <field> <value>` | `--status S`, `--all`, `--json` | The reading list (unread by default). |
+| `hq dump "<text>"` | `--area A` | Capture a thought to the inbox. |
+| `hq inbox` | `--area A`, `--json` | List the inbox. |
+| `hq triage <ref> <to>` | `--project X` and the `save` flags; `--target D` for goals | Turn an inbox item into a task (or any kind), a `goal` or `reading` (its link), or `drop` it. |
+| `hq day [DATE]` | `--json`, `--no-git` | What happened that day: actions grouped by area and goal/project, links read, inbox captures, your git commits in recorded repos, events. |
+| `hq day end [DATE]` | `--summary "line"`, `--summary-file F` | Save the day to `days/<date>.md` (see below). |
+| `hq week [DATE]`, `hq month [DATE]` | `--json`, `--no-git` | The timeline: each day's counts and saved summary, then finished and started work by area and goal/project. |
+| `hq cal add "<title>" <start> [<end>]` | `--repeat daily\|weekdays\|weekly`, `--area A`, `--notes T` | Add an event. Start: `2026-10-23 10:00`, `tomorrow 9:30`, `+1d 14:00`, `10:00` (today) or a date (all day). End: a time, a duration (`45m`) or a full time; default 30 minutes. |
+| `hq cal list [DATE]` / `rm <ref>` / `export` | `--days N`, `--area A`, `--json` | List upcoming events (7 days), remove one, or write `calendar.ics` for calendar apps (one way). |
+| `hq artifact add <ref> <file>` | `--about T`, `--why T`, `--project X` | Copy a file next to an entry or goal (or register one already there) with what it is and why it exists. `hq artifact list <ref>` lists them; `hq show` includes them. |
+| `hq init --autostart` / `--no-autostart` | | Start `hq serve` at login and open the Today page (Windows Startup folder, macOS LaunchAgent, Linux XDG autostart). Off by default. |
+
+**Today** builds itself, in this order: today's events; overdue and due
+today; planned for today (`do-on`, past ones roll forward); tasks in goals
+whose target is within a week; active P1/P2 work; blocked entries with their
+reasons; the top three unread links. An entry shows once, in its first
+section. Reading items, inbox items and events may have an area; ones
+without show under every area filter.
+
+**Day end.** `hq day end` writes `days/<date>.md` with three sections.
+*Summary* is a templated recap, or an agent's prose from `--summary-file`;
+a rerun refreshes a templated summary but keeps prose. *My notes* is yours:
+`--summary "..."` appends a line (never twice) and hq never rewrites it.
+*Facts* is regenerated from `hq day` every time. `hq week` and `hq month`
+show each day's summary.
+
+**New folders.** Advanced mode adds `reading/`, `inbox/`, `calendar/` and
+`days/` at the top of `HQ_ROOT`, one Markdown file per item, and
+`.artifacts.json` inside entry folders. Classic mode shows the folders as
+plain browsable artifacts and ignores the rest.
 
 `<ref>` is a slug or any unique substring of one; an ambiguous ref is an error
 that lists the matches. An exact slug wins over longer ones, except that a bare
@@ -233,7 +266,9 @@ that have a `README.md`.
 ## Using it from an agent
 
 Install the skill with `hq init --install-skill`, or copy
-`hq-skill-template.md` yourself. Agents should prefer `hq list --json` and
+`hq-skill-template.md` yourself. In advanced mode the same command installs
+`hq-skill-advanced.md` instead (and updates an older copy): a request-to-command
+table, `--by agent` on every write, and the day-end recipe. Agents should prefer `hq list --json` and
 `hq find --json` and read the `path` field from the result.
 
 ## Sharing a skill

@@ -141,5 +141,40 @@ def run_checks() -> list[dict]:
                 if ".sync-conflict-" in low or "conflicted copy" in low:
                     add(Path(dirpath) / name, "sync conflict copy")
 
+    import hq_artifacts
+    import hq_items
+
+    for index, name in hq_artifacts.dangling():
+        add(index, f"artifact '{name}' is registered but missing")
+    for item in hq_items.stale_inbox():
+        add(item["path"], f"inbox item is {item['age']} days old (triage it)")
+    for p in hq_items._files("reading"):
+        text = _read(p)
+        if text is UNREADABLE:
+            add(p, UNREADABLE)
+        elif text is not None:
+            meta, _ = hq_core.frontmatter_parse(text)
+            if not str(meta.get("url") or "").startswith(("http://", "https://")):
+                add(p, "reading item has no http(s) url")
+            st = meta.get("status")
+            if not _empty(st) and st not in hq_items.READING_STATUSES:
+                add(p, f"reading status '{st}' is not one of {', '.join(hq_items.READING_STATUSES)}")
+            for prob in _field_problems(meta, ("priority", "est", "area")):
+                add(p, prob)
+    for p in hq_items._files("event"):
+        text = _read(p)
+        if text is UNREADABLE:
+            add(p, UNREADABLE)
+        elif text is not None and hq_items.event_view(p) is None:
+            add(p, "event has no valid start")
+    days_dir = root / "days"
+    if days_dir.is_dir():
+        for p in sorted(days_dir.glob("*.md")):
+            text = _read(p)
+            if text is UNREADABLE:
+                add(p, UNREADABLE)
+            elif text is not None and not hq_core._FRONTMATTER_RE.match(text):
+                add(p, "missing frontmatter")
+
     problems.sort(key=lambda p: (p["path"], p["problem"]))
     return problems

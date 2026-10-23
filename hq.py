@@ -33,36 +33,42 @@ def _render_table(header, rows):
     )
 
 
-def cmd_save(args):
-    tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
+def save_entry(kind, title, project=None, tags=None, raw_fields=None):
+    """Validate the advanced fields, save, and record the repo. Shared by
+    `hq save` and `hq triage`. raw_fields: {flag name: raw value or None}."""
     fields = {}
-    for flag, attr in SAVE_FIELD_FLAGS:
-        value = getattr(args, attr)
+    for flag, value in (raw_fields or {}).items():
         if value is not None:
             require_advanced(f"--{flag}")
             fields[flag] = hq_fields.normalize(flag, value)
     advanced = hq_core.mode() == "advanced"
     if fields:
-        if args.kind in ("learning", "skill"):
-            raise HqError(f"kind={args.kind!r} does not take {', '.join('--' + f for f in fields)}")
+        if kind in ("learning", "skill"):
+            raise HqError(f"kind={kind!r} does not take {', '.join('--' + f for f in fields)}")
         if "goal" in fields:
             import hq_registry
 
             if hq_registry.get_goal(fields["goal"]) is None:
                 raise HqError(f"unknown goal '{fields['goal']}'")
     cwd = Path.cwd()
-    path = hq_core.save(args.kind, args.title, project_override=args.project,
-                        tags=tags, cwd=cwd, fields=fields or None)
-    if advanced and args.project is None and args.kind not in ("learning", "skill"):
+    path = hq_core.save(kind, title, project_override=project,
+                        tags=tags or [], cwd=cwd, fields=fields or None)
+    if advanced and project is None and kind not in ("learning", "skill"):
         repo = hq_core.detect_repo_root(cwd)
         if repo is not None:
             import hq_registry
 
             try:
                 hq_registry.record_repo(path.parent.parent.parent.name, repo)
-            except HqError as e:  # the entry is already saved; don't report failure
+            except (HqError, OSError) as e:  # the entry is already saved; don't report failure
                 print(f"warning: could not record repo: {e}", file=sys.stderr)
-    print(path)
+    return path
+
+
+def cmd_save(args):
+    tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
+    raw = {flag: getattr(args, attr) for flag, attr in SAVE_FIELD_FLAGS}
+    print(save_entry(args.kind, args.title, project=args.project, tags=tags, raw_fields=raw))
 
 
 def cmd_start(args):
@@ -162,7 +168,8 @@ def cmd_log(args):
 def cmd_init(args):
     import hq_init
 
-    print("\n".join(hq_init.init(args.root, args.install_skill, mode=args.mode)))
+    print("\n".join(hq_init.init(args.root, args.install_skill, mode=args.mode,
+                                 autostart=args.autostart)))
 
 
 def cmd_serve(args):
@@ -216,14 +223,16 @@ def cmd_show(args):
     print()
     if data["body"]:
         print(data["body"])
-    if data["files"]:
+    if data["artifacts"]:
         print("files:")
-        for f in data["files"]:
-            print(f"  {f}")
+        for a in data["artifacts"]:
+            note = f"  {a['about']} (why: {a['why']})" if a.get("about") else ""
+            gone = "  [missing]" if a.get("missing") else ""
+            print(f"  {a['file']}{note}{gone}")
     if data["log"]:
         print("log:")
         for e in data["log"]:
-            print(f"  {_log_line(e)}")
+            print(f"  {' '.join(_log_line(e).split())}")
     if "tasks" in data:
         print("tasks:")
         for t in data["tasks"]:
@@ -337,6 +346,10 @@ def build_parser():
     p_init.add_argument("--root", help="where the archive lives (defaults to $HQ_ROOT)")
     p_init.add_argument("--install-skill", action="store_true", help="copy the Claude Code skill to ~/.claude/skills/hq")
     p_init.add_argument("--mode", choices=hq_core.MODES, help="switch between classic and advanced mode")
+    p_init.add_argument("--autostart", action="store_true", default=None,
+                        help="start `hq serve` at login (advanced mode)")
+    p_init.add_argument("--no-autostart", dest="autostart", action="store_false",
+                        help="remove the login item")
     p_init.set_defaults(func=cmd_init)
 
     p_save = sub.add_parser("save", help="save a new task/bug/presentation/learning")
@@ -453,6 +466,9 @@ def build_parser():
     p_set.add_argument("value")
     p_project.set_defaults(func=cmd_project)
 
+    import hq_views
+
+    hq_views.register(sub)
     return parser
 
 
@@ -464,14 +480,19 @@ def main(argv=None):
         return e.code if isinstance(e.code, int) else 1
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="replace")
-    if args.command in ("save", "start", "archive", "goal", "project",
-                        "set", "note", "block", "unblock", "unstart") and "HQ_ROOT" not in os.environ:
+    import hq_views
+
+    writes = ("save", "start", "archive", "goal", "project", "set", "note", "block",
+              "unblock", "unstart", *hq_views.WRITE_COMMANDS)
+    if args.command in writes and "HQ_ROOT" not in os.environ:
         print(f"warning: HQ_ROOT is not set, writing to {hq_core.HQ_ROOT}. Run `hq init`.", file=sys.stderr)
     try:
         if hq_core.mode() == "advanced":
             actor = args.by or os.environ.get("HQ_ACTOR") or "user"
             if actor not in hq_core.ACTORS:
-                raise HqError(f"invalid HQ_ACTOR {actor!r}; choose from {', '.join(hq_core.ACTORS)}")
+                if args.command in writes and args.command != "init":
+                    raise HqError(f"invalid HQ_ACTOR {actor!r}; choose from {', '.join(hq_core.ACTORS)}")
+                actor = "user"  # reads, log and init don't tag anything: don't block them
             hq_core.ACTOR = actor
         else:
             hq_core.ACTOR = None  # classic never tags log lines, even in-process after an advanced run

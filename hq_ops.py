@@ -232,7 +232,10 @@ def show(ref: str, project: str | None = None, log_limit: int = 10) -> dict:
         lines = [e for e in hq_core.read_log()
                  if e.get("slug") == r.slug and e.get("project") == r.project]
         tasks = None
+    import hq_artifacts
+
     out.update(record=record, body=body.strip("\n"), files=files,
+               artifacts=hq_artifacts.for_folder(r.path.parent),
                log=lines[-log_limit:] if log_limit > 0 else [])
     if tasks is not None:
         out["tasks"] = tasks
