@@ -154,6 +154,66 @@ class WriteTests(ServerCase):
         self.assertEqual(sum(l["action"] == "start" for l in self.log()), 1)
 
 
+class DailyLoopWebTests(ServerCase):
+    def ok(self, body):
+        status, out = self.post(body)
+        self.assertEqual((status, out.get("ok")), (200, True), out)
+        return out
+
+    def test_new_pages_are_served(self):
+        for page in ("/reading", "/inbox", "/calendar"):
+            status, raw = self.request("GET", page)
+            self.assertEqual(status, 200)
+            self.assertIn(b"hq-token", raw)
+
+    def test_inbox_reading_and_triage(self):
+        self.ok({"action": "dump", "text": "-odd idea with https://e.com/x", "area": "work"})
+        self.ok({"action": "dump", "text": "Plan the offsite"})
+        _, state = self.get_json("/api/state")
+        self.assertEqual(len(state["inbox"]), 2)
+        self.ok({"action": "triage", "ref": "odd-idea", "to": "reading", "est": "5m"})
+        self.ok({"action": "triage", "ref": "offsite", "to": "task", "project": "p", "do_on": "today",
+                 "est": "20m", "priority": "P2"})
+        _, state = self.get_json("/api/state")
+        self.assertEqual(state["inbox"], [])
+        self.assertEqual([i["url"] for i in state["reading"]], ["https://e.com/x"])
+        task = next(r for r in state["entries"] if r["slug"] == "plan-the-offsite")
+        self.assertEqual((task["priority"], task["do_on"], task["est"]), ("P2", state["today"], 20))
+        self.ok({"action": "read_set", "ref": "e-com-x", "field": "priority", "value": "P1"})
+        _, free = self.get_json("/api/free?minutes=10")
+        self.assertEqual([(i["type"], i["priority"]) for i in free["items"]], [("reading", "P1")])
+        self.ok({"action": "read_done", "ref": "e-com-x"})
+        self.assertTrue(all(e.get("by") == "web" for e in self.log()[2:]))  # after setUp
+
+    def test_read_add_needs_a_web_link(self):
+        status, out = self.post({"action": "read_add", "url": "list"})
+        self.assertEqual(status, 400)
+        self.assertIn("http", out["error"])
+        self.ok({"action": "read_add", "url": "https://e.com/-dash", "title": "-Dash", "mins": "4"})
+
+    def test_calendar_and_day(self):
+        self.ok({"action": "cal_add", "title": "-Standup", "start": "today 10:00", "end": "15m",
+                 "repeat": "weekdays"})
+        _, state = self.get_json("/api/state")
+        self.assertEqual([e["title"] for e in state["events"]], ["-Standup"])
+        month = state["today"][:7]
+        _, cal = self.get_json(f"/api/calendar?month={month}")
+        self.assertEqual(cal["month"], month)
+        self.assertTrue(any(e["date"] == state["today"] for e in cal["events"]))
+        self.ok({"action": "day_end", "summary": "-a quiet day"})
+        _, cal = self.get_json(f"/api/calendar?month={month}")
+        self.assertIn(state["today"], cal["days"])
+        _, day = self.get_json("/api/day?date=today")
+        self.assertEqual(day["saved"]["notes"], "- -a quiet day")
+        self.assertIn("-Standup", day["facts_md"])
+        event_id = cal["events"][0]["id"]
+        self.ok({"action": "cal_rm", "ref": event_id})
+        _, state = self.get_json("/api/state")
+        self.assertEqual(state["events"], [])
+        status, out = self.get_json("/api/calendar?month=nope")
+        self.assertEqual(status, 400)
+
+
 class VersionTests(TempRoot):
     def test_cli_version_flag(self):
         code, out, err = run_cli(["--version"])

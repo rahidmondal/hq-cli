@@ -9,8 +9,9 @@ const scrim = document.getElementById("scrim");
 const dialog = document.getElementById("dialog");
 const toastEl = document.getElementById("toast");
 
-const PAGES = { "/": "today", "/today": "today", "/board": "board", "/goals": "goals" };
-const PATHS = { today: "/", board: "/board", goals: "/goals" };
+const PAGES = { "/": "today", "/today": "today", "/board": "board", "/goals": "goals",
+  "/reading": "reading", "/inbox": "inbox", "/calendar": "calendar" };
+const PATHS = { today: "/", board: "/board", goals: "/goals", reading: "/reading", inbox: "/inbox", calendar: "/calendar" };
 const KINDS = ["task", "bug", "presentation"];
 const DAY_MINUTES = 480;
 
@@ -20,8 +21,10 @@ const S = {
   area: localStorage.getItem("hq.area") || "",
   q: "",
   sel: -1,
-  drawer: null, // {project, slug} or {goal}
+  drawer: null, // {project, slug}, {goal} or {day}
   free: null, // {minutes, items}
+  month: null, // "YYYY-MM" shown on the Calendar page
+  cal: null, // /api/calendar for that month
 };
 
 // ---- helpers --------------------------------------------------------------
@@ -31,6 +34,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 const enc = encodeURIComponent;
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const inArea = (r) => !S.area || r.area === S.area;
+// Reading, inbox items and events without an area show under every filter.
+const inAreaItem = (i) => !S.area || !i.area || i.area === S.area;
 const prioRank = (p) => Number(String(p).slice(1)) || 3;
 
 function parseISO(iso) {
@@ -112,6 +117,7 @@ async function refresh() {
     S.data = await getJSON("/api/state");
     const minutes = S.free?.minutes ?? (Number(localStorage.getItem("hq.free")) || 30);
     S.free = { minutes, items: (await getJSON(`/api/free?minutes=${minutes}`)).items };
+    if (S.page === "calendar") await loadMonth(S.month);
   } catch (e) {
     toast(e.message, true);
     return;
@@ -121,9 +127,13 @@ async function refresh() {
 }
 
 const refOf = (el) => {
-  const item = el.closest("[data-slug],[data-goal]");
+  const item = el.closest("[data-slug],[data-goal],[data-reading],[data-inbox],[data-day]");
   if (!item) return null;
-  return item.dataset.goal ? { goal: item.dataset.goal } : { project: item.dataset.project, slug: item.dataset.slug };
+  const d = item.dataset;
+  if (d.reading) return { reading: d.reading };
+  if (d.inbox) return { inbox: d.inbox };
+  if (d.day) return { day: d.day };
+  return d.goal ? { goal: d.goal } : { project: d.project, slug: d.slug };
 };
 
 // ---- shared pieces ----------------------------------------------------------
@@ -233,7 +243,10 @@ function freeCard() {
   const chips = [15, 30, 60, 90].map((m) =>
     `<button type="button" class="chip${m === minutes ? " on" : ""}" data-free="${m}">${fmtMinutes(m)}</button>`).join("");
   const list = items.length
-    ? items.map((r) => `<div class="mini item" data-project="${esc(r.project)}" data-slug="${esc(r.slug)}" data-t="${esc(searchText(r))}" data-open>
+    ? items.map((r) => r.type === "reading"
+      ? `<a class="mini item" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" data-t="${esc(searchText(r))}">
+        <i class="dot ${esc(r.priority)}"></i><span class="mtitle">${esc(r.title)}</span><span class="kindtag">read</span><span class="mest">${esc(r.est_label)}</span></a>`
+      : `<div class="mini item" data-project="${esc(r.project)}" data-slug="${esc(r.slug)}" data-t="${esc(searchText(r))}" data-open>
         <i class="dot ${esc(r.priority)}"></i><span class="mtitle">${esc(r.title)}</span><span class="mest">${esc(r.est_label)}</span></div>`).join("")
     : `<p class="quiet">Nothing with an estimate fits in ${esc(fmtMinutes(minutes))}. Set estimates in a task's details.</p>`;
   return `<section class="side-card glass">
@@ -272,6 +285,33 @@ function blockedCard(blocked) {
       <button class="btn small" data-do="unblock">Unblock</button></div>`).join("")}</section>`;
 }
 
+function scheduleCard() {
+  const events = S.data.events.filter(inAreaItem);
+  if (!events.length) return "";
+  return `<section class="side-card glass"><h3>Schedule<a class="more" href="/calendar" data-nav="calendar">Calendar</a></h3>
+    ${events.map((e) => `<div class="mini item event" data-day="${esc(S.data.today)}" data-t="${esc(e.title.toLowerCase())}" data-open>
+      <span class="etime">${esc(e.when)}</span><span class="mtitle">${esc(e.title)}</span>${e.repeat ? `<span class="mest">${esc(e.repeat)}</span>` : ""}</div>`).join("")}
+  </section>`;
+}
+
+function readCard() {
+  const unread = S.data.reading.filter((i) => i.status === "unread" && inAreaItem(i));
+  if (!unread.length) return "";
+  return `<section class="side-card glass"><h3>Read next<span class="count">${unread.length}</span><a class="more" href="/reading" data-nav="reading">Reading list</a></h3>
+    ${unread.slice(0, 3).map((i) => `<a class="mini item" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" data-t="${esc(searchText(i))}">
+      <i class="dot ${esc(i.priority)}"></i><span class="mtitle">${esc(i.title)}</span><span class="mest">${esc(i.est_label || "")}</span></a>`).join("")}
+  </section>`;
+}
+
+function wrapCard() {
+  const inbox = S.data.inbox.filter(inAreaItem).length;
+  return `<section class="side-card glass wrap-card"><h3>End of day</h3>
+    <p class="quiet">${S.data.day_saved ? "Today is saved. Wrap up again to refresh it." : "Save a summary of today to your calendar."}</p>
+    <div class="wrap-actions"><button class="btn primary" data-act="day" data-date="${esc(S.data.today)}">${S.data.day_saved ? "Update today" : "Wrap up the day"}</button>
+    ${inbox ? `<a class="btn" href="/inbox" data-nav="inbox">Inbox <span class="count">${inbox}</span></a>` : ""}</div>
+  </section>`;
+}
+
 function renderToday() {
   const day = parseISO(S.data.today);
   const { lists, blocked, doing } = todayParts();
@@ -297,7 +337,7 @@ function renderToday() {
     ${budgetCard(doing, blocked.length)}
     <div class="today-grid">
       <div class="today-main">${listHtml}</div>
-      <aside class="today-side">${freeCard()}${goalsCard()}${blockedCard(blocked)}</aside>
+      <aside class="today-side">${scheduleCard()}${freeCard()}${readCard()}${goalsCard()}${blockedCard(blocked)}${wrapCard()}</aside>
     </div>
   </div>`;
 }
@@ -389,11 +429,153 @@ function renderGoals() {
   return html + "</div>";
 }
 
+// ---- Reading ------------------------------------------------------------------
+
+function host(url) {
+  try { return new URL(url).host.replace(/^www\./, ""); } catch { return url; }
+}
+
+function readRow(i) {
+  const sub = [
+    `<span>${esc(host(i.url))}</span>`,
+    i.area ? `<span class="area ${esc(i.area)}">${esc(i.area)}</span>` : "",
+    i.note ? `<span class="note">${esc(i.note)}</span>` : "",
+  ].join("");
+  const when = i.status === "unread" ? `added ${shortDate(i.added)}` : `${i.status} ${i.read_on ? shortDate(i.read_on) : ""}`;
+  const acts = i.status === "unread"
+    ? `<button class="btn" data-do="read-done">Mark read</button><button class="btn quiet" data-do="read-drop">Drop</button>` : "";
+  return `<div class="row item reading${i.status !== "unread" ? " closed" : ""}" data-reading="${esc(i.slug)}" data-t="${esc(searchText(i) + " " + i.url.toLowerCase())}">
+    ${prioSelect(i, i.status !== "unread" ? "disabled" : "")}
+    <a class="main" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer"><div class="title">${esc(i.title)}<span class="ext" aria-hidden="true">↗</span></div><div class="sub">${sub}</div></a>
+    <div class="meta"><span class="when">${esc(when)}</span>${i.est_label ? `<span class="est">${esc(i.est_label)}</span>` : ""}</div>
+    <div class="acts">${acts}</div>
+  </div>`;
+}
+
+function renderReading() {
+  const items = S.data.reading.filter(inAreaItem);
+  const unread = items.filter((i) => i.status === "unread");
+  const done = items.filter((i) => i.status !== "unread").sort((a, b) => String(b.read_on).localeCompare(String(a.read_on)));
+  const mins = unread.reduce((n, i) => n + (i.est || 0), 0);
+  const lede = unread.length ? `${plural(unread.length, "link")} to read${mins ? `, about ${fmtMinutes(mins)}` : ""}. The top three show on Today.` : "Save links here to read when you have a moment.";
+  const prios = S.data.fields.priorities.map((p) => [p, p]);
+  let html = `<div class="page">${head("Reading", lede)}
+    <form class="capture glass" data-form="read-add">
+      <input name="url" type="url" placeholder="Paste a link (https://...)" required autocomplete="off" aria-label="Link">
+      <input name="note" placeholder="Why it caught your eye (optional)" autocomplete="off" aria-label="Note">
+      ${selectCtl("priority", prios, "P3", 'name="priority" aria-label="Priority"')}
+      <button class="btn primary">Save link</button>
+    </form>`;
+  html += unread.length
+    ? `<section class="section glass tone-violet"><h2><i class="marker"></i>Unread<span class="count">${unread.length}</span></h2>${unread.map(readRow).join("")}</section>`
+    : `<div class="empty-state glass"><strong>Nothing to read.</strong><p>hq fetches each page's title and estimates how long it takes to read.</p></div>`;
+  if (done.length) {
+    html += `<details class="section glass closed-list"><summary><h2><i class="marker"></i>Read and dropped<span class="count">${done.length}</span><span class="toggle"></span></h2></summary>${done.map(readRow).join("")}</details>`;
+  }
+  return html + "</div>";
+}
+
+// ---- Inbox --------------------------------------------------------------------
+
+function renderInbox() {
+  const items = S.data.inbox.filter(inAreaItem);
+  const areas = [["", "Any area"], ...S.data.fields.areas.map((a) => [a, a[0].toUpperCase() + a.slice(1)])];
+  let html = `<div class="page">${head("Inbox", "Capture now, sort later. Turn each item into a task, a goal or a link, or drop it.")}
+    <form class="capture glass" data-form="dump">
+      <input name="text" placeholder="What's on your mind?" required autocomplete="off" aria-label="Capture">
+      ${selectCtl("area", areas, S.area, 'name="area" aria-label="Area"')}
+      <button class="btn primary">Capture</button>
+    </form>`;
+  if (!items.length) {
+    return html + `<div class="empty-state glass"><strong>Inbox zero.</strong><p>Capture ideas here or from the terminal with <code>hq dump "..."</code>.</p></div></div>`;
+  }
+  html += `<section class="section glass tone-amber"><h2><i class="marker"></i>To sort<span class="count">${items.length}</span></h2>
+    ${items.map((i) => {
+      const age = -daysFromToday(i.added);
+      const link = /https?:\/\/\S+/.test(i.title);
+      return `<div class="row item inboxrow" data-inbox="${esc(i.slug)}" data-t="${esc((i.title + " " + i.slug).toLowerCase())}">
+        <i class="inbox-dot${age > 14 ? " old" : ""}"></i>
+        <div class="main"><div class="title">${esc(i.title)}</div><div class="sub">
+          ${i.area ? `<span class="area ${esc(i.area)}">${esc(i.area)}</span>` : ""}<span${age > 14 ? ' class="reason"' : ""}>${age === 0 ? "today" : age === 1 ? "yesterday" : `${age} days ago`}</span></div></div>
+        <div class="meta"></div>
+        <div class="acts"><button class="btn" data-do="triage-task">Task</button><button class="btn" data-do="triage-goal">Goal</button>
+          ${link ? `<button class="btn" data-do="triage-reading">Link</button>` : ""}<button class="btn quiet" data-do="triage-drop">Drop</button></div>
+      </div>`;
+    }).join("")}</section>`;
+  return html + "</div>";
+}
+
+// ---- Calendar -------------------------------------------------------------------
+
+async function loadMonth(month) {
+  S.month = month || S.month || S.data.today.slice(0, 7);
+  S.cal = await getJSON(`/api/calendar?month=${enc(S.month)}`);
+}
+
+function shiftMonth(month, n) {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function isoOf(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function dayMarks(iso) {
+  const open = (r) => r.status !== "archive" && inArea(r);
+  return {
+    events: S.cal.events.filter((e) => e.date === iso && inAreaItem(e)),
+    due: S.data.entries.filter((r) => open(r) && r.due === iso),
+    doOn: S.data.entries.filter((r) => open(r) && r.do_on === iso && r.due !== iso),
+    targets: S.data.goals.filter((g) => g.status === "active" && g.target === iso && inArea(g)),
+    saved: S.cal.days[iso],
+  };
+}
+
+function renderCalendar() {
+  if (!S.cal) return `<div class="page wide">${head("Calendar")}<p class="quiet">Loading...</p></div>`;
+  const [y, m] = S.month.split("-").map(Number);
+  const title = new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const tools = `<div class="monthnav"><button class="btn quiet" data-month="${shiftMonth(S.month, -1)}" aria-label="Previous month">‹</button>
+    <button class="btn" data-month="${S.data.today.slice(0, 7)}">Today</button>
+    <button class="btn quiet" data-month="${shiftMonth(S.month, 1)}" aria-label="Next month">›</button></div>
+    <button class="btn primary" data-act="new-event">New event</button>`;
+  const names = [];
+  for (let i = 0; i < 7; i++) names.push(new Date(2026, 9, 19 + i).toLocaleDateString(undefined, { weekday: "short" }));
+  let cells = "";
+  for (let d = parseISO(S.cal.start); isoOf(d) <= S.cal.end; d.setDate(d.getDate() + 1)) {
+    const iso = isoOf(d);
+    const k = dayMarks(iso);
+    const out = d.getMonth() !== m - 1;
+    const lines = [
+      ...k.events.map((e) => `<span class="cl ev"><b>${esc(e.time || "all day")}</b> ${esc(e.title)}</span>`),
+      ...k.targets.map((g) => `<span class="cl tg">◎ ${esc(g.title)}</span>`),
+      ...k.due.map((r) => `<span class="cl du">${esc(r.title)}</span>`),
+      ...k.doOn.map((r) => `<span class="cl dn">${esc(r.title)}</span>`),
+    ];
+    const extra = lines.length > 4 ? `<span class="cl more">+${lines.length - 4} more</span>` : "";
+    const empty = !lines.length && !k.saved;
+    const text = [...k.events, ...k.targets, ...k.due, ...k.doOn].map((x) => x.title).join(" ") + " " + (k.saved?.summary || "");
+    cells += `<div role="button" tabindex="0" class="cell item${out ? " out" : ""}${iso === S.data.today ? " now" : ""}${empty ? " empty" : ""}" data-day="${iso}"
+      data-t="${esc(text.toLowerCase())}" data-open aria-label="${esc(parseISO(iso).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }))}">
+      <span class="dnum"><span class="wd">${esc(names[(d.getDay() + 6) % 7])}</span>${d.getDate()}${k.saved ? `<i class="saved" title="Day saved"></i>` : ""}</span>
+      ${lines.slice(0, 4).join("")}${extra}
+      ${k.saved?.summary ? `<span class="csum">${esc(k.saved.summary)}</span>` : ""}
+    </div>`;
+  }
+  return `<div class="page wide">${head(title, "Events, due dates, planned days, goal targets and saved days. Click a day to open it.", tools)}
+    <div class="legendrow"><span class="lg"><i class="cdot ev"></i>Event</span><span class="lg"><i class="cdot du"></i>Due</span>
+      <span class="lg"><i class="cdot dn"></i>Planned</span><span class="lg"><i class="cdot tg"></i>Goal target</span><span class="lg"><i class="saved"></i>Day saved</span></div>
+    <div class="calgrid glass">${names.map((n) => `<div class="dow">${esc(n)}</div>`).join("")}${cells}</div></div>`;
+}
+
 // ---- render + search ----------------------------------------------------------
 
 function render() {
   if (!S.data) return;
-  const html = { today: renderToday, board: renderBoard, goals: renderGoals }[S.page]();
+  const html = { today: renderToday, board: renderBoard, goals: renderGoals, reading: renderReading,
+    inbox: renderInbox, calendar: renderCalendar }[S.page]();
   main.innerHTML = html;
   $$(".navlink").forEach((a) => (a.dataset.nav === S.page
     ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
@@ -402,6 +584,8 @@ function render() {
     today: todayParts().doing.length,
     board: S.data.entries.filter((r) => r.status !== "archive" && inArea(r)).length,
     goals: S.data.goals.filter((g) => g.status === "active" && inArea(g)).length,
+    reading: S.data.reading.filter((i) => i.status === "unread" && inAreaItem(i)).length,
+    inbox: S.data.inbox.filter(inAreaItem).length,
   };
   $$("[data-count]").forEach((el) => (el.textContent = counts[el.dataset.count] || ""));
   applySearch();
@@ -410,7 +594,11 @@ function render() {
 
 function applySearch() {
   const q = S.q.trim().toLowerCase();
-  $$(".item", main).forEach((el) => (el.hidden = !!q && !(el.dataset.t || "").includes(q)));
+  $$(".item", main).forEach((el) => {
+    const miss = !!q && !(el.dataset.t || "").includes(q);
+    if (el.classList.contains("cell")) el.classList.toggle("dim", miss); // keep the month grid intact
+    else el.hidden = miss;
+  });
   $$(".section, .project, .side-card", main).forEach((sec) => {
     sec.hidden = !!q && !sec.querySelector(".item:not([hidden])");
   });
@@ -434,6 +622,7 @@ function select(i, scroll = true) {
 function go(page) {
   if (!PATHS[page]) return;
   S.page = page;
+  if (page === "calendar") loadMonth(S.month).then(render).catch((e) => toast(e.message, true));
   S.sel = -1;
   if (location.pathname !== PATHS[page]) history.pushState(null, "", PATHS[page]);
   render();
@@ -528,11 +717,45 @@ function goalDrawer(e) {
   </div>`;
 }
 
+function dayDrawer(d) {
+  const day = parseISO(d.date);
+  const past = d.date <= S.data.today;
+  const c = d.counts;
+  const bits = [["finished", c.finished], ["started", c.started], ["dropped", c.dropped], ["blocked", c.blocked],
+    ["commits", c.commits], ["notes", c.notes]].filter(([, n]) => n).map(([k, n]) => `${n} ${k}`);
+  const events = d.events.length ? d.events.map((e) => `<li><span>${esc(e.time ? `${e.time}–${e.end_time}` : "all day")}</span>
+      <span>${esc(e.title)}</span><button class="btn small quiet" data-do="event-rm" data-event="${esc(e.id)}" title="Remove this event">Remove</button></li>`).join("")
+    : `<li class="none">No events.</li>`;
+  const repeats = [["", "Once"], ...S.data.fields.repeats.map((r) => [r, r[0].toUpperCase() + r.slice(1)])];
+  const saved = d.saved;
+  return `<div data-day="${esc(d.date)}">
+    <div class="top"><h2>${esc(day.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" }))}</h2>
+      <button class="btn quiet" data-do="close" aria-label="Close">Close</button></div>
+    <div class="where">${bits.length ? esc(bits.join(", ")) : past ? "Nothing recorded yet." : "Upcoming."}${saved ? `, saved ${esc(String(saved.updated || "").slice(11, 16))}` : ""}</div>
+    <h3>Events</h3><ul class="evlist">${events}</ul>
+    <form class="eventbox" data-form="event-add">
+      <input name="title" placeholder="Add an event" required autocomplete="off" aria-label="Event title">
+      <input name="start" type="time" aria-label="Start time" title="Start (leave empty for all day)">
+      <input name="end" type="time" aria-label="End time" title="End">
+      ${selectCtl("repeat", repeats, "", 'name="repeat" aria-label="Repeat"')}
+      <button class="btn">Add</button>
+    </form>
+    ${past ? `<h3>Summary</h3>
+      ${saved?.summary ? `<div class="md">${window.marked ? marked.parse(saved.summary) : esc(saved.summary)}</div>` : `<p class="quiet">Not saved yet. Wrapping up saves a summary built from the facts below; an agent can write a better one with <code>hq day end --summary-file</code>.</p>`}
+      ${saved?.notes ? `<h3>My notes</h3><div class="md">${window.marked ? marked.parse(saved.notes) : esc(saved.notes)}</div>` : ""}
+      <form class="notebox" data-form="day-end"><input name="summary" placeholder="${saved ? "Add a line to My notes (optional)" : "A line for My notes (optional)"}" autocomplete="off">
+        <button class="btn primary">${saved ? "Update the day" : "Wrap up the day"}</button></form>
+      <h3>Facts</h3><div class="md facts">${window.marked ? marked.parse(d.facts_md) : esc(d.facts_md)}</div>` : ""}
+  </div>`;
+}
+
 async function openDrawer(ref, quiet = false) {
-  const q = ref.goal ? `goal=${enc(ref.goal)}` : `project=${enc(ref.project)}&slug=${enc(ref.slug)}`;
+  if (ref.reading || ref.inbox) return;
+  const url = ref.day ? `/api/day?date=${enc(ref.day)}`
+    : `/api/entry?${ref.goal ? `goal=${enc(ref.goal)}` : `project=${enc(ref.project)}&slug=${enc(ref.slug)}`}`;
   let e;
   try {
-    e = await getJSON(`/api/entry?${q}`);
+    e = await getJSON(url);
   } catch (err) {
     if (!quiet) toast(err.message, true);
     closeDrawer();
@@ -540,8 +763,8 @@ async function openDrawer(ref, quiet = false) {
   }
   const scrollTop = drawer.scrollTop;
   S.drawer = ref;
-  drawer.innerHTML = ref.goal ? goalDrawer(e) : entryDrawer(e);
-  const md = drawer.querySelector(".md");
+  drawer.innerHTML = ref.day ? dayDrawer(e) : ref.goal ? goalDrawer(e) : entryDrawer(e);
+  const md = ref.day ? null : drawer.querySelector(".md");
   if (md && window.marked) md.innerHTML = e.body.trim() ? marked.parse(e.body) : `<p style="color:var(--muted)">No notes in this file.</p>`;
   drawer.hidden = false;
   scrim.hidden = false;
@@ -600,6 +823,58 @@ function openNewGoal() {
   dialog.querySelector("[name=title]").focus();
 }
 
+function openNewEvent(date) {
+  const d = S.data;
+  const repeats = [["", "Doesn't repeat"], ...d.fields.repeats.map((r) => [r, r[0].toUpperCase() + r.slice(1)])];
+  dialog.innerHTML = `<form method="dialog" data-form="new-event">
+    <h2>New event</h2>
+    <input class="titlein" name="title" placeholder="What's happening?" required autocomplete="off">
+    <div class="fields">
+      <div class="field"><label>Date</label><input type="date" name="date" value="${esc(date || d.today)}" required></div>
+      <div class="field"><label>Start</label><input type="time" name="start" title="Leave empty for all day"></div>
+      <div class="field"><label>End</label><input type="time" name="end"></div>
+      <div class="field"><label>Repeat</label>${selectCtl("repeat", repeats, "", 'name="repeat"')}</div>
+      <div class="field"><label>Area</label>${selectCtl("area", [["", "Any"], ...d.fields.areas.map((a) => [a, a[0].toUpperCase() + a.slice(1)])], S.area, 'name="area"')}</div>
+    </div>
+    <p class="quiet">Leave the start empty for an all-day event. With no end, it lasts 30 minutes.</p>
+    <p class="err"></p>
+    <div class="foot"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="save">Add event</button></div>
+  </form>`;
+  dialog.showModal();
+  dialog.querySelector("[name=title]").focus();
+}
+
+function openTriageTask(slug) {
+  const d = S.data;
+  const item = d.inbox.find((i) => i.slug === slug);
+  const last = localStorage.getItem("hq.project") || d.projects[0]?.name || "";
+  const goals = d.goals.filter((g) => g.status === "active");
+  dialog.innerHTML = `<form method="dialog" data-form="triage-task" data-ref="${esc(slug)}">
+    <h2>Make it a task</h2>
+    <p class="triage-text">${esc(item ? item.title : slug)}</p>
+    <div class="fields">
+      <div class="field"><label>Project</label><input name="project" list="projlist" value="${esc(last)}" required></div>
+      <div class="field"><label>Kind</label>${selectCtl("to", d.fields.kinds.map((k) => [k, k[0].toUpperCase() + k.slice(1)]), "task", 'name="to"')}</div>
+      <div class="field"><label>Priority</label>${selectCtl("priority", d.fields.priorities.map((p) => [p, p]), "P3", 'name="priority"')}</div>
+      <div class="field"><label>Due</label><input type="date" name="due"></div>
+      <div class="field"><label>Do on</label><input type="date" name="do_on"></div>
+      <div class="field"><label>Estimate</label><input name="est" placeholder="e.g. 30m"></div>
+      <div class="field" style="grid-column:span 3"><label>Goal</label>${selectCtl("goal_ref", [["", "None"], ...goals.map((g) => [g.slug, g.title])], "", 'name="goal_ref"')}</div>
+    </div>
+    <datalist id="projlist">${d.projects.map((p) => `<option value="${esc(p.name)}">`).join("")}</datalist>
+    <p class="err"></p>
+    <div class="foot"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="save">Make task</button></div>
+  </form>`;
+  dialog.showModal();
+  dialog.querySelector("[name=project]").focus();
+}
+
+function eventBody(data, date) {
+  const start = data.start ? `${date} ${data.start}` : date;
+  const end = data.start ? data.end : "";
+  return { action: "cal_add", title: data.title, start, end, repeat: data.repeat, area: data.area };
+}
+
 dialog.addEventListener("submit", async (ev) => {
   const form = ev.target;
   if (ev.submitter?.value === "cancel") return; // let the dialog close
@@ -610,6 +885,11 @@ dialog.addEventListener("submit", async (ev) => {
   if (form.dataset.form === "new-task") {
     localStorage.setItem("hq.project", data.project);
     ok = await cmd({ action: "save", ...data }, "Task saved");
+  } else if (form.dataset.form === "new-event") {
+    ok = await cmd(eventBody(data, data.date), "Event added");
+  } else if (form.dataset.form === "triage-task") {
+    localStorage.setItem("hq.project", data.project);
+    ok = await cmd({ action: "triage", ref: form.dataset.ref, ...data }, "Moved to the board");
   } else {
     ok = await cmd({ action: "goal_new", ...data }, "Goal created");
   }
@@ -626,7 +906,27 @@ function setFree(value) {
     .catch((e) => toast(e.message, true));
 }
 
-async function doAction(what, ref) {
+async function doAction(what, ref, btn) {
+  if (ref.reading) {
+    if (what === "read-done") return cmd({ action: "read_done", ref: ref.reading }, "Marked read");
+    if (what === "read-drop") return cmd({ action: "read_drop", ref: ref.reading }, "Dropped from the list");
+    return;
+  }
+  if (ref.inbox) {
+    if (what === "triage-task") return openTriageTask(ref.inbox);
+    if (what === "triage-goal") return cmd({ action: "triage", ref: ref.inbox, to: "goal" }, "Made it a goal");
+    if (what === "triage-reading") return cmd({ action: "triage", ref: ref.inbox, to: "reading" }, "Saved to the reading list");
+    if (what === "triage-drop") return cmd({ action: "triage", ref: ref.inbox, to: "drop" }, "Dropped");
+    return;
+  }
+  if (ref.day) {
+    if (what === "event-rm") {
+      const e = btn.dataset.event;
+      if (!confirm("Remove this event? A repeating event is removed from every day.")) return;
+      return cmd({ action: "cal_rm", ref: e }, "Event removed");
+    }
+    return;
+  }
   const base = ref.goal ? { goal: ref.goal } : { project: ref.project, slug: ref.slug };
   switch (what) {
     case "start": return cmd({ action: "start", ...base }, "Started");
@@ -658,10 +958,14 @@ document.addEventListener("click", (ev) => {
   }
   const chip = t.closest("[data-free]");
   if (chip) return setFree(chip.dataset.free);
+  const month = t.closest("[data-month]");
+  if (month) return loadMonth(month.dataset.month).then(render).catch((e) => toast(e.message, true));
   const act = t.closest("[data-act]");
   if (act) {
     if (act.dataset.act === "new-task") return openNewTask(act.dataset.goalDefault || "");
     if (act.dataset.act === "new-goal") return openNewGoal();
+    if (act.dataset.act === "new-event") return openNewEvent(S.drawer?.day);
+    if (act.dataset.act === "day") return openDrawer({ day: act.dataset.date });
   }
   const btn = t.closest("[data-do]");
   if (btn) {
@@ -673,7 +977,7 @@ document.addEventListener("click", (ev) => {
       return box.querySelector("input").focus();
     }
     const ref = refOf(btn);
-    if (ref) return doAction(what, ref);
+    if (ref) return doAction(what, ref, btn);
   }
   if (t.closest("select, input, a, button")) return;
   const open = t.closest("[data-open]");
@@ -696,6 +1000,7 @@ document.addEventListener("change", (ev) => {
   if (!ref) return;
   const field = el.dataset.set;
   const value = el.value.trim() || "none";
+  if (ref.reading) return cmd({ action: "read_set", ref: ref.reading, field, value }, "Priority set");
   const label = field === "do-on" ? "Do-on date" : field[0].toUpperCase() + field.slice(1);
   cmd({ action: "set", field, value, ...(ref.goal ? { goal: ref.goal } : ref) },
     value === "none" ? `${label} cleared` : `${label} set`);
@@ -707,7 +1012,12 @@ document.addEventListener("submit", (ev) => {
   ev.preventDefault();
   const kind = form.dataset.form;
   if (kind === "free") return setFree(form.minutes.value);
+  const data = Object.fromEntries(new FormData(form));
+  if (kind === "read-add") return cmd({ action: "read_add", ...data }, "Saved to the reading list");
+  if (kind === "dump") return cmd({ action: "dump", ...data }, "Captured");
   const ref = refOf(form);
+  if (ref?.day && kind === "day-end") return cmd({ action: "day_end", date: ref.day, summary: data.summary }, "Day saved");
+  if (ref?.day && kind === "event-add") return cmd(eventBody(data, ref.day), "Event added");
   if (!ref) return;
   const base = ref.goal ? { goal: ref.goal } : ref;
   if (kind === "block") cmd({ action: "block", reason: form.reason.value, ...base }, "Blocked");
@@ -741,6 +1051,9 @@ document.addEventListener("keydown", (ev) => {
     t: () => { closeDrawer(); go("today"); },
     b: () => { closeDrawer(); go("board"); },
     g: () => { closeDrawer(); go("goals"); },
+    r: () => { closeDrawer(); go("reading"); },
+    i: () => { closeDrawer(); go("inbox"); },
+    c: () => { closeDrawer(); go("calendar"); },
     j: () => select(S.sel + 1),
     k: () => select(Math.max(0, S.sel - 1)),
     e: () => openSelected(),
@@ -758,6 +1071,7 @@ function openSelected() {
 addEventListener("popstate", () => {
   S.page = PAGES[location.pathname] || "today";
   closeDrawer();
+  if (S.page === "calendar") return loadMonth(S.month).then(render);
   render();
 });
 

@@ -17,11 +17,13 @@ import re
 import secrets
 import threading
 import urllib.parse
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import hq_core
+import hq_day
 import hq_fields
+import hq_items
 import hq_ops
 import hq_registry
 import hq_serve
@@ -30,6 +32,7 @@ from hq_core import HqError
 
 WEB_DIR = Path(__file__).with_name("web")
 STATIC = {"app.css": "text/css", "app.js": "text/javascript"}
+PAGES = ("/", "/today", "/board", "/goals", "/reading", "/inbox", "/calendar")
 MAX_BODY = 64 * 1024
 _WRITE_LOCK = threading.Lock()  # hq.main swaps sys.stdout; run one command at a time
 
@@ -56,6 +59,14 @@ def _goal(g: dict, records: list[dict]) -> dict:
     return out
 
 
+def _item(i: dict) -> dict:
+    """A reading/inbox item or event occurrence for the browser."""
+    out = {k: v for k, v in i.items() if k != "path"}
+    if i.get("est"):
+        out["est_label"] = hq_fields.format_est(i["est"])
+    return out
+
+
 def state(today: date | None = None) -> dict:
     today = today or date.today()
     records = hq_ops.entry_records()
@@ -66,18 +77,60 @@ def state(today: date | None = None) -> dict:
     except HqError:
         registry = {}
     projects = sorted({r["project"] for r in records} | set(registry))
+    saved = hq_day.read_day(today.isoformat())
     return {
         "today": today.isoformat(),
         "sections": [{**s, "items": [_record(r) for r in s["items"]]} for s in sections],
         "entries": [_record(r) for r in records],
         "goals": [_goal(g, records) for g in goals],
         "projects": [{"name": p, "area": hq_registry.project_area(p, registry)} for p in projects],
-        "fields": {"priorities": list(hq_fields.PRIORITIES), "areas": list(hq_fields.AREAS)},
+        "events": [_item({**o, "when": hq_today.event_when(o)}) for o in hq_items.occurrences(today, today)],
+        "reading": [_item(i) for i in hq_items.list_reading()],
+        "inbox": [_item(i) for i in hq_items.list_inbox()],
+        "day_saved": bool(saved),
+        "fields": {"priorities": list(hq_fields.PRIORITIES), "areas": list(hq_fields.AREAS),
+                   "kinds": [k for k in hq_core.KINDS if k not in ("learning", "skill")],
+                   "repeats": list(hq_items.REPEATS)},
     }
 
 
 def free(minutes: int) -> list[dict]:
-    return [_record(r) for r in hq_today.free(hq_ops.entry_records(), minutes, limit=50)]
+    picks = hq_today.free(hq_ops.entry_records(), minutes, limit=50,
+                          reading=hq_items.list_reading(status="unread"))
+    return [_item(p) if p.get("type") == "reading" else {**_record(p), "type": "entry"} for p in picks]
+
+
+def calendar(month: str | None) -> dict:
+    """The month grid (Monday-first weeks covering the month): event
+    occurrences and saved day summaries. Due/do-on/targets come from state."""
+    try:
+        first = date.fromisoformat((month or date.today().isoformat()[:7]) + "-01")
+    except ValueError:
+        raise HqError(f"bad month {month!r} (use YYYY-MM)")
+    _, last = hq_day.month_range(first)
+    start = first - timedelta(days=first.weekday())
+    end = last + timedelta(days=6 - last.weekday())
+    days = {}
+    d = start
+    while d <= end:
+        saved = hq_day.read_day(d.isoformat())
+        if saved:
+            days[d.isoformat()] = {"summary": hq_day.first_line(saved["summary"]),
+                                   "templated": saved["templated"]}
+        d += timedelta(days=1)
+    return {"month": first.isoformat()[:7], "start": start.isoformat(), "end": end.isoformat(),
+            "events": [_item(o) for o in hq_items.occurrences(start, end)], "days": days}
+
+
+def day(when: str | None) -> dict:
+    d = hq_day.parse_day(when)
+    b = hq_day.bundle(d)
+    saved = hq_day.read_day(d.isoformat())
+    return {"date": d.isoformat(), "facts_md": hq_day.facts_markdown(b),
+            "counts": {k: len(b[k]) for k in ("finished", "started", "dropped", "blocked")}
+            | {"commits": len(b["commits"]), "notes": b["notes"]},
+            "events": b["events"],
+            "saved": {k: v for k, v in saved.items() if k != "path"} if saved else None}
 
 
 def entry(project: str | None, slug: str | None, goal: str | None) -> dict:
@@ -124,7 +177,7 @@ def _target(body: dict) -> tuple[list[str], str]:
     if goal:
         return [], "goal/" + hq_core.slugify(goal)
     project = _text(body, "project")
-    return ["--project", project], _text(body, "slug")
+    return [f"--project={project}"], _text(body, "slug")
 
 
 def argv_for(body: dict) -> list[str]:
@@ -149,26 +202,63 @@ def argv_for(body: dict) -> list[str]:
         proj, ref = _target(body)
         return ["note", *proj, "--", ref, _text(body, "text")]
     if action == "save":
-        opts = ["--project", _text(body, "project")]
+        opts = [f"--project={_text(body, 'project')}"]
         for key, flag in (("priority", "--priority"), ("goal_ref", "--goal"), ("due", "--due"),
                           ("do_on", "--do-on"), ("est", "--est"), ("area", "--area")):
             value = _text(body, key, required=False)
             if value:
-                opts += [flag, value]
+                opts.append(f"{flag}={value}")
         return ["save", *opts, "--", _text(body, "kind", required=False) or "task", _text(body, "title")]
     if action == "goal_new":
         opts = []
         for key in ("area", "target", "priority"):
             value = _text(body, key, required=False)
             if value:
-                opts += ["--" + key, value]
+                opts.append(f"--{key}={value}")
         return ["goal", "new", *opts, "--", _text(body, "title")]
     if action == "goal_done":
         dropped = ["--dropped"] if body.get("dropped") else []
         return ["goal", "done", *dropped, "--", "goal/" + hq_core.slugify(_text(body, "goal"))]
     if action == "project_area":
         return ["project", "set", "--", _text(body, "project"), "area", _text(body, "area")]
+    if action == "read_add":
+        url = _text(body, "url")
+        if not url.lower().startswith(("http://", "https://")):
+            raise HqError("a link must start with http:// or https://")
+        return ["read", *_opts(body, ("priority", "note", "mins", "area", "title")), "--", url]
+    if action in ("read_done", "read_drop"):
+        return ["read", "done" if action == "read_done" else "drop", "--", _text(body, "ref")]
+    if action == "read_set":
+        value = _text(body, "value", required=False) or "none"
+        return ["read", "set", "--", _text(body, "ref"), _text(body, "field"), value]
+    if action == "dump":
+        return ["dump", *_opts(body, ("area",)), "--", _text(body, "text")]
+    if action == "triage":
+        to = _text(body, "to")
+        keys = ("project", "priority", "due", "do_on", "est", "area", "target", "goal_ref")
+        return ["triage", *_opts(body, keys), "--", _text(body, "ref"), to]
+    if action == "cal_add":
+        opts = _opts(body, ("repeat", "area", "notes"))
+        end = _text(body, "end", required=False)
+        return ["cal", "add", *opts, "--", _text(body, "title"), _text(body, "start"), *([end] if end else [])]
+    if action == "cal_rm":
+        return ["cal", "rm", "--", _text(body, "ref")]
+    if action == "day_end":
+        day = hq_fields.parse_date(_text(body, "date", required=False) or "today")
+        return ["day", *_opts(body, ("summary",)), "--", "end", day]
     raise HqError(f"unknown action {action!r}")
+
+
+_FLAGS = {"do_on": "--do-on", "goal_ref": "--goal"}
+
+
+def _opts(body: dict, keys) -> list[str]:
+    out = []
+    for key in keys:
+        value = _text(body, key, required=False)
+        if value:
+            out.append(f"{_FLAGS.get(key, '--' + key)}={value}")
+    return out
 
 
 def run(argv: list[str]) -> tuple[int, str, str]:
@@ -217,7 +307,7 @@ class Handler(hq_serve.Handler):
         url = urllib.parse.urlsplit(self.path)
         path = urllib.parse.unquote(url.path)
         query = {k: v[-1] for k, v in urllib.parse.parse_qs(url.query).items()}
-        if path in ("/", "/today", "/board", "/goals"):
+        if path in PAGES:
             return self._send(app_page(self.token))
         if path.startswith("/_app/") and path[len("/_app/"):] in STATIC:
             name = path[len("/_app/"):]
@@ -233,6 +323,10 @@ class Handler(hq_serve.Handler):
                     return self._json({"minutes": minutes, "items": free(minutes)})
                 if path == "/api/entry":
                     return self._json(entry(query.get("project"), query.get("slug"), query.get("goal")))
+                if path == "/api/calendar":
+                    return self._json(calendar(query.get("month")))
+                if path == "/api/day":
+                    return self._json(day(query.get("date")))
             except HqError as e:
                 return self._json({"ok": False, "error": str(e)}, 400)
             return self._json({"ok": False, "error": "not found"}, 404)
