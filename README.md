@@ -185,6 +185,29 @@ flowchart LR
 It only reads your archive and only listens on localhost. Press ctrl-c to stop.
 If the port is taken, pass `--port`.
 
+### In advanced mode
+
+In advanced mode `hq serve` opens the v2 app instead (the v1 board is still at
+`/classic`):
+
+- **Today** (the default page) builds itself from your data: overdue and due
+  today, planned for today (`do-on`), tasks in goals whose target is within a
+  week, active P1/P2 work, and blocked entries with their reasons. A bar shows
+  the day's estimated time by priority; **I've got N minutes** lists the open
+  tasks whose estimate fits.
+- **Board** is the v1 board with priority, area, due, estimate and blocked
+  shown on each card. **Goals** shows each goal's progress and target date.
+- Click any entry or goal to open its details: change priority, area,
+  estimate, due, do-on and goal; start, finish, drop, block or unblock it; add
+  a note; see its recent activity and its notes.
+- Filter by area (All / Work / Personal). Keys: `t` `b` `g` switch pages, `n`
+  new task, `/` search, `j` `k` move, `e` open, `Esc` close.
+
+Every change runs the same command you'd type (`hq --by web ...`), so the
+checks and the log match the terminal. The page still only listens on
+localhost; changes need a per-run token embedded in the page and a same-origin
+request, so other websites can't write to it.
+
 ## Data layout
 
 ```

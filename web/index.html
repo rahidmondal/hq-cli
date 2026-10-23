@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="hq-token" content="__TOKEN__">
+<title>hq</title>
+<link rel="stylesheet" href="/_app/app.css">
+</head>
+<body>
+<div class="app">
+  <nav class="rail" aria-label="Pages">
+    <a class="brand" href="/" data-nav="today">hq</a>
+    <a class="navlink" href="/" data-nav="today"><span class="key">t</span>Today</a>
+    <a class="navlink" href="/board" data-nav="board"><span class="key">b</span>Board</a>
+    <a class="navlink" href="/goals" data-nav="goals"><span class="key">g</span>Goals</a>
+    <button class="newbtn" type="button" data-act="new-task"><span class="key">n</span>New task</button>
+    <div class="areas" role="group" aria-label="Area">
+      <button type="button" data-area="">All</button>
+      <button type="button" data-area="work">Work</button>
+      <button type="button" data-area="personal">Personal</button>
+    </div>
+    <p class="keys-help">Keys: <kbd>/</kbd> search, <kbd>j</kbd> <kbd>k</kbd> move, <kbd>e</kbd> open, <kbd>Esc</kbd> close</p>
+    <a class="classic-link" href="/classic">Classic board</a>
+  </nav>
+  <main id="main" tabindex="-1"></main>
+</div>
+<aside id="drawer" class="drawer" hidden aria-label="Details"></aside>
+<div id="scrim" class="scrim" hidden></div>
+<dialog id="dialog"></dialog>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="/_marked.js"></script>
+<script src="/_app/app.js"></script>
+</body>
+</html>
