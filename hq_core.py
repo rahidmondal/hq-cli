@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 
-VERSION = "2.0.0-dev"  # v1.0 is the git tag; bump when a v2 phase ships
+VERSION = "2.0.0"  # v1.0 is the git tag for the original version
 
 
 class HqError(Exception):

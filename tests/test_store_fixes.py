@@ -74,20 +74,20 @@ class GoalVsEntryRefTests(StoreFixTests):
     def setUp(self):
         super().setUp()
         set_mode("advanced")
-        self.ok("goal", "new", "kb fix sprint")
-        self.ok("save", "task", "kb fix sprint 3 weeks", "--project", "p")
+        self.ok("goal", "new", "launch sprint")
+        self.ok("save", "task", "launch sprint 3 weeks", "--project", "p")
 
     def test_bare_ref_matching_goal_and_entry_is_ambiguous(self):
-        code, _, err = run_cli(["set", "kb-fix-sprint", "priority", "P1"])
+        code, _, err = run_cli(["set", "launch-sprint", "priority", "P1"])
         self.assertEqual(code, 1)
-        self.assertIn("goal/kb-fix-sprint", err)
-        self.assertIn("p/planning/kb-fix-sprint-3-weeks", err)
-        goal = hq_core.HQ_ROOT / "goals" / "kb-fix-sprint" / "README.md"
+        self.assertIn("goal/launch-sprint", err)
+        self.assertIn("p/planning/launch-sprint-3-weeks", err)
+        goal = hq_core.HQ_ROOT / "goals" / "launch-sprint" / "README.md"
         self.assertNotIn("priority: P1", goal.read_text(encoding="utf-8"))
 
     def test_goal_prefix_still_reaches_the_goal(self):
-        self.ok("set", "goal/kb-fix-sprint", "priority", "P1")
-        goal = hq_core.HQ_ROOT / "goals" / "kb-fix-sprint" / "README.md"
+        self.ok("set", "goal/launch-sprint", "priority", "P1")
+        goal = hq_core.HQ_ROOT / "goals" / "launch-sprint" / "README.md"
         self.assertIn("priority: P1", goal.read_text(encoding="utf-8"))
 
     def test_exact_goal_with_no_other_match_still_resolves(self):

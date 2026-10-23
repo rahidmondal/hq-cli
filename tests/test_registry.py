@@ -9,14 +9,14 @@ from helpers import TempRoot, run_cli, set_mode
 
 class RegistryTests(TempRoot):
     def test_create_goal_writes_readme(self):
-        p = hq_registry.create_goal("Ship KB entitlement", area="work", target="2026-10-31", priority="P2")
-        self.assertEqual(p, hq_core.HQ_ROOT / "goals" / "ship-kb-entitlement" / "README.md")
+        p = hq_registry.create_goal("Ship the billing page", area="work", target="2026-10-31", priority="P2")
+        self.assertEqual(p, hq_core.HQ_ROOT / "goals" / "ship-the-billing-page" / "README.md")
         meta, body = hq_core.frontmatter_parse(p.read_text(encoding="utf-8"))
         self.assertEqual(meta["kind"], "goal")
         self.assertEqual(meta["status"], "active")
         self.assertEqual(meta["target"], "2026-10-31")
         self.assertEqual(list(meta)[:5], ["kind", "area", "status", "priority", "target"])
-        self.assertTrue(body.lstrip().startswith("# Ship KB entitlement"))
+        self.assertTrue(body.lstrip().startswith("# Ship the billing page"))
 
     def test_create_goal_duplicate_errors(self):
         hq_registry.create_goal("Dup")

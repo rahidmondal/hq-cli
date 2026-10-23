@@ -529,6 +529,7 @@ def lanes(start: datetime.date, end: datetime.date) -> list[dict]:
         registry = {}
     by_ref = {(r["project"], r["slug"]): r for r in records}
     last: dict[str, str] = {}
+    seen: dict[str, str] = {}
     days: dict[str, set] = {}
     for e in hq_core.read_log():
         when = _local(e.get("ts", ""))
@@ -546,6 +547,7 @@ def lanes(start: datetime.date, end: datetime.date) -> list[dict]:
             keys.append("g:" + rec["goal"])
         for k in keys:
             last[k] = max(last.get(k, d), d)
+            seen[k] = min(seen.get(k, d), d)
             if start.isoformat() <= d <= end.isoformat():
                 days.setdefault(k, set()).add(d)
     out = []
@@ -553,7 +555,7 @@ def lanes(start: datetime.date, end: datetime.date) -> list[dict]:
         mine = [r for r in records if r["project"] == project]
         created = min((str(r["created"]) for r in mine if r["created"]), default=None)
         k = "p:" + project
-        first = created or last.get(k)
+        first = min([x for x in (created and created[:10], seen.get(k)) if x], default=None)
         if not first:
             continue
         out.append({"kind": "project", "id": project, "title": project,
@@ -564,7 +566,7 @@ def lanes(start: datetime.date, end: datetime.date) -> list[dict]:
                     "days": sorted(days.get(k, ()))})
     for g in goals:
         k = "g:" + g["slug"]
-        first = str(g["created"] or last.get(k) or "")[:10]
+        first = min([x for x in (str(g["created"] or "")[:10], seen.get(k)) if x], default="")
         if not first:
             continue
         end_day = g["target"] or last.get(k, first)
