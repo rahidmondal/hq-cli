@@ -8,6 +8,7 @@ A day file has three fixed sections:
   ## My notes  never rewritten; --summary appends a line (no duplicates)
   ## Facts     regenerated every time from the bundle"""
 import calendar
+import html
 import datetime
 import re
 import subprocess
@@ -227,7 +228,7 @@ def bundle(day: datetime.date, with_git: bool = True) -> dict:
 # ---- rendering ---------------------------------------------------------------
 
 def _titles(items: list[dict], n: int = 4) -> str:
-    names = [f"\"{i['title']}\"" for i in items[:n]]
+    names = [f"\"{_md(i['title'])}\"" for i in items[:n]]
     more = len(items) - n
     return ", ".join(names) + (f" and {more} more" if more > 0 else "")
 
@@ -266,7 +267,7 @@ def template_summary(b: dict) -> str:
             if not bits:
                 n = sum(len(i["lines"]) for i in g["items"])
                 bits.append(f"{n} update{'s' if n != 1 else ''}")
-            by_area.setdefault(area["area"], []).append(f"{g['group']}: {'; '.join(bits)}")
+            by_area.setdefault(area["area"], []).append(f"{_md(g['group'])}: {'; '.join(bits)}")
     if by_area:
         out.append("")
         for area, rows in by_area.items():
@@ -274,37 +275,42 @@ def template_summary(b: dict) -> str:
     return "\n".join(out)
 
 
+def _md(text) -> str:
+    """Escape text going into Markdown that the app renders as HTML."""
+    return html.escape(str(text), quote=False)
+
+
 def facts_markdown(b: dict) -> str:
     out = []
     for area in b["areas"]:
         out.append(f"### {area['area'].capitalize()}")
         for g in area["groups"]:
-            out.append(f"**{g['group']}**")
+            out.append(f"**{_md(g['group'])}**")
             for item in g["items"]:
                 for line in item["lines"]:
                     label = item["title"] if item["title"] != "(the goal itself)" else "goal"
-                    out.append(f"- {line['time']} {label}: {line['text']}")
+                    out.append(f"- {line['time']} {_md(label)}: {_md(line['text'])}")
             out.append("")
     if b["commits"]:
         out.append("### Commits")
         for c in b["commits"]:
-            out.append(f"- {c['time']} {c['project']} `{c['hash']}` {c['subject']}")
+            out.append(f"- {c['time']} {_md(c['project'])} `{c['hash']}` {_md(c['subject'])}")
         out.append("")
     if b["reading"]:
         out.append("### Reading")
         for r in b["reading"]:
-            out.append(f"- {r['time']} {r['text']}: {r['title']}")
+            out.append(f"- {r['time']} {_md(r['text'])}: {_md(r['title'])}")
         out.append("")
     if b["inbox"]:
         out.append("### Inbox")
         for r in b["inbox"]:
-            out.append(f"- {r['time']} {r['text']}: {r['title']}")
+            out.append(f"- {r['time']} {_md(r['text'])}: {_md(r['title'])}")
         out.append("")
     if b["events"]:
         out.append("### Calendar")
         for e in b["events"]:
             when = f"{e['time']}–{e['end_time']}" if e["time"] else "all day"
-            out.append(f"- {when} {e['title']}")
+            out.append(f"- {when} {_md(e['title'])}")
         out.append("")
     return "\n".join(out).strip() or "Nothing recorded."
 

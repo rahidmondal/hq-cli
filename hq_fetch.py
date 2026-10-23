@@ -53,7 +53,8 @@ def parse(html: str) -> dict:
         p.close()
     except Exception:  # html.parser is lenient, but never let a bad page break a save
         pass
-    title = re.sub(r"\s+", " ", p.og_title or p.title).strip()
+    # The title comes from someone else's page: keep it plain text, no markup.
+    title = re.sub(r"\s+", " ", re.sub(r"[<>]", "", p.og_title or p.title)).strip()
     minutes = max(1, math.ceil(p.words / WPM)) if p.words else None
     return {"title": title, "words": p.words, "minutes": minutes}
 

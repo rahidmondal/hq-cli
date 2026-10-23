@@ -392,3 +392,13 @@ class ClassicReadsNewData(Adv):
         for folder in ("reading", "inbox", "calendar", "days"):
             self.assertIn(folder, page)
         self.assertNotIn(".artifacts.json", page)
+
+
+class UntrustedTextTests(Adv):
+    def test_fetched_title_loses_markup_and_facts_are_escaped(self):
+        page = hq_fetch.parse("<title>&lt;img src=x onerror=alert(1)&gt; Post</title>")
+        self.assertNotIn("<", page["title"])
+        self.ok("read", "https://e.com/x", "--offline", "--title", "<b>bold</b> & co")
+        facts = hq_day.facts_markdown(hq_day.bundle(datetime.date.today(), with_git=False))
+        self.assertIn("&lt;b&gt;bold&lt;/b&gt; &amp; co", facts)
+        self.assertNotIn("<b>", facts)

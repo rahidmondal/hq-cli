@@ -37,6 +37,8 @@ const inArea = (r) => !S.area || r.area === S.area;
 // Reading, inbox items and events without an area show under every filter.
 const inAreaItem = (i) => !S.area || !i.area || i.area === S.area;
 const prioRank = (p) => Number(String(p).slice(1)) || 3;
+// Links come from files anyone could edit: only ever link to http(s).
+const safeUrl = (u) => (/^https?:\/\//i.test(u || "") ? u : "#");
 
 function parseISO(iso) {
   const [y, m, d] = iso.split("-").map(Number);
@@ -244,7 +246,7 @@ function freeCard() {
     `<button type="button" class="chip${m === minutes ? " on" : ""}" data-free="${m}">${fmtMinutes(m)}</button>`).join("");
   const list = items.length
     ? items.map((r) => r.type === "reading"
-      ? `<a class="mini item" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer" data-t="${esc(searchText(r))}">
+      ? `<a class="mini item" href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener noreferrer" data-t="${esc(searchText(r))}">
         <i class="dot ${esc(r.priority)}"></i><span class="mtitle">${esc(r.title)}</span><span class="kindtag">read</span><span class="mest">${esc(r.est_label)}</span></a>`
       : `<div class="mini item" data-project="${esc(r.project)}" data-slug="${esc(r.slug)}" data-t="${esc(searchText(r))}" data-open>
         <i class="dot ${esc(r.priority)}"></i><span class="mtitle">${esc(r.title)}</span><span class="mest">${esc(r.est_label)}</span></div>`).join("")
@@ -298,7 +300,7 @@ function readCard() {
   const unread = S.data.reading.filter((i) => i.status === "unread" && inAreaItem(i));
   if (!unread.length) return "";
   return `<section class="side-card glass"><h3>Read next<span class="count">${unread.length}</span><a class="more" href="/reading" data-nav="reading">Reading list</a></h3>
-    ${unread.slice(0, 3).map((i) => `<a class="mini item" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer" data-t="${esc(searchText(i))}">
+    ${unread.slice(0, 3).map((i) => `<a class="mini item" href="${esc(safeUrl(i.url))}" target="_blank" rel="noopener noreferrer" data-t="${esc(searchText(i))}">
       <i class="dot ${esc(i.priority)}"></i><span class="mtitle">${esc(i.title)}</span><span class="mest">${esc(i.est_label || "")}</span></a>`).join("")}
   </section>`;
 }
@@ -446,7 +448,7 @@ function readRow(i) {
     ? `<button class="btn" data-do="read-done">Mark read</button><button class="btn quiet" data-do="read-drop">Drop</button>` : "";
   return `<div class="row item reading${i.status !== "unread" ? " closed" : ""}" data-reading="${esc(i.slug)}" data-t="${esc(searchText(i) + " " + i.url.toLowerCase())}">
     ${prioSelect(i, i.status !== "unread" ? "disabled" : "")}
-    <a class="main" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer"><div class="title">${esc(i.title)}<span class="ext" aria-hidden="true">↗</span></div><div class="sub">${sub}</div></a>
+    <a class="main" href="${esc(safeUrl(i.url))}" target="_blank" rel="noopener noreferrer"><div class="title">${esc(i.title)}<span class="ext" aria-hidden="true">↗</span></div><div class="sub">${sub}</div></a>
     <div class="meta"><span class="when">${esc(when)}</span>${i.est_label ? `<span class="est">${esc(i.est_label)}</span>` : ""}</div>
     <div class="acts">${acts}</div>
   </div>`;
