@@ -104,8 +104,7 @@ kbd, .key {
 .newbtn:hover { transform: translateY(-1px); box-shadow: 0 12px 26px -6px rgba(106, 75, 208, .55); }
 .newbtn .label { flex: 1; text-align: left; }
 .newbtn .key { background: rgba(255, 255, 255, .18); color: #fff; border-color: rgba(255, 255, 255, .35); }
-.railgroup { display: flex; flex-direction: column; gap: .45rem; }
-.raillabel { padding: 0 .3rem; font-size: .78rem; font-weight: 600; color: var(--muted); }
+.railtop { display: flex; flex-direction: column; gap: .55rem; }
 .areas {
   display: flex; padding: 3px; gap: 2px; border-radius: 11px; background: rgba(117, 86, 214, .08);
 }
@@ -509,7 +508,8 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; }
     justify-content: space-around; gap: .3rem; padding: .4rem .6rem calc(.4rem + env(safe-area-inset-bottom));
     background: rgba(255, 255, 255, .78); border-right: 0; border-top: 1px solid var(--glass-edge);
   }
-  .brand, .railgroup, .railfoot, .key, .badge { display: none; }
+  .brand, .railfoot, .key, .badge, .railtop .areas { display: none; }
+  .railtop { order: 2; }
   .navgroup { flex-direction: row; gap: .2rem; }
   .navlink { flex-direction: column; gap: .15rem; padding: .35rem .7rem; font-size: .72rem; }
   .newbtn { padding: .55rem .8rem; }
