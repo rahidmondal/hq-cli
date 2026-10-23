@@ -236,7 +236,12 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def serve(port: int = 8787, open_browser: bool = True) -> None:
-    server = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(hq_core.HQ_ROOT)))
+    handler = Handler
+    if hq_core.mode() == "advanced":  # the v2 app; classic serves exactly the v1 board
+        import hq_web
+
+        handler = hq_web.make_handler()
+    server = ThreadingHTTPServer(("127.0.0.1", port), partial(handler, directory=str(hq_core.HQ_ROOT)))
     url = f"http://127.0.0.1:{port}/"
     print(f"serving {hq_core.HQ_ROOT} at {url} (ctrl-c to stop)")
     if open_browser:

@@ -1,6 +1,7 @@
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -390,6 +391,82 @@ class TestSearchEntries(unittest.TestCase):
         hq_core.save("task", "Unrelated Content", project_override="demo")
         self.assertEqual(hq_core.search_entries("project"), [])
         self.assertEqual(hq_core.search_entries("tags"), [])
+
+
+class TestAtomicWrite(unittest.TestCase):
+    def test_atomic_write_replaces_content(self):
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "f.md"
+            hq_core.atomic_write_text(target, "a")
+            hq_core.atomic_write_text(target, "b")
+            self.assertEqual(target.read_text(encoding="utf-8"), "b")
+            self.assertEqual(list(Path(d).iterdir()), [target])
+
+    def test_atomic_write_matches_path_write_text_bytes(self):
+        text = "---\nkind: task\n---\n\n# T\n\nline\n"
+        with tempfile.TemporaryDirectory() as d:
+            ref = Path(d) / "ref.md"
+            ref.write_text(text, encoding="utf-8")
+            target = Path(d) / "f.md"
+            hq_core.atomic_write_text(target, text)
+            self.assertEqual(target.read_bytes(), ref.read_bytes())
+
+    def test_atomic_write_leaves_no_temp_on_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "f.md"
+            with mock.patch("hq_core.os.replace", side_effect=OSError("boom")):
+                with self.assertRaises(OSError):
+                    hq_core.atomic_write_text(target, "x")
+            leftovers = [p.name for p in Path(d).iterdir() if p.name.startswith(".f.md")]
+            self.assertEqual(leftovers, [])
+            self.assertFalse(target.exists())
+
+
+class TestYamlSafe(unittest.TestCase):
+    def test_hostile_values_round_trip(self):
+        for v in ["waiting: on keys", "#1 blocker", 'say "hi"', "[not a list",
+                  "- dash", "yes", "naïve café"]:
+            with self.subTest(v=v):
+                text = hq_core.frontmatter_dump({"blocked": v}, "# T\n", yaml_safe=True)
+                self.assertEqual(
+                    hq_core.frontmatter_parse(text, yaml_safe=True)[0]["blocked"], v)
+
+    def test_hostile_values_are_quoted_in_output(self):
+        text = hq_core.frontmatter_dump({"blocked": "waiting: on keys"}, "# T\n",
+                                        yaml_safe=True)
+        self.assertIn('blocked: "waiting: on keys"\n', text)
+
+    def test_quoted_list_items_round_trip(self):
+        tags = ["a", "#hash", "x: y", "yes"]
+        text = hq_core.frontmatter_dump({"tags": tags}, "# T\n", yaml_safe=True)
+        self.assertEqual(hq_core.frontmatter_parse(text, yaml_safe=True)[0]["tags"], tags)
+
+    def test_plain_values_unquoted(self):
+        meta = {"project": "demo", "kind": "task", "status": "planning",
+                "created": "2026-08-09", "tags": ["a", "b"]}
+        self.assertEqual(
+            hq_core.frontmatter_dump(meta, "# D\n"),
+            "---\nproject: demo\nkind: task\nstatus: planning\n"
+            "created: 2026-08-09\ntags: [a, b]\n---\n\n# D\n",
+        )
+
+    def test_yaml_scalar_quotes_only_when_needed(self):
+        self.assertEqual(hq_core.yaml_scalar("P2"), "P2")
+        self.assertEqual(hq_core.yaml_scalar("a: b"), '"a: b"')
+        self.assertEqual(hq_core.yaml_scalar(""), "")
+
+    def test_yaml_scalar_quotes_newlines_and_coerces_non_str(self):
+        self.assertEqual(hq_core.yaml_scalar("a\nb"), '"a\\nb"')
+        self.assertEqual(hq_core.yaml_scalar(5), "5")
+        meta, _ = hq_core.frontmatter_parse(
+            hq_core.frontmatter_dump({"k": "a\nb"}, "x", yaml_safe=True), yaml_safe=True)
+        self.assertEqual(meta["k"], "a\nb")
+
+    def test_yaml_safe_false_is_raw_v1(self):
+        meta = {"tags": ["yes", "#u"], "note": '"q"', "other": "key: val"}
+        text = hq_core.frontmatter_dump(meta, "# T\n", yaml_safe=False)
+        self.assertEqual(text, '---\ntags: [yes, #u]\nnote: "q"\nother: key: val\n---\n\n# T\n')
+        self.assertEqual(hq_core.frontmatter_parse(text, yaml_safe=False)[0], meta)
 
 
 if __name__ == "__main__":
