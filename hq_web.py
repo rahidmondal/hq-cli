@@ -31,7 +31,7 @@ import hq_today
 from hq_core import HqError
 
 WEB_DIR = Path(__file__).with_name("web")
-STATIC = {"app.css": "text/css", "app.js": "text/javascript"}
+STATIC = {"app.css": "text/css", "app.js": "text/javascript", "favicon.svg": "image/svg+xml"}
 PAGES = ("/", "/today", "/board", "/goals", "/reading", "/inbox", "/calendar")
 MAX_BODY = 64 * 1024
 _WRITE_LOCK = threading.Lock()  # hq.main swaps sys.stdout; run one command at a time

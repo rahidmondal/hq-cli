@@ -83,15 +83,10 @@ kbd, .key {
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
 }
 .brand { display: flex; align-items: center; gap: .6rem; padding: 0 .5rem; }
-.logo {
-  display: grid; place-items: center; width: 2.1rem; height: 2.1rem; border-radius: 10px; color: #fff;
-  font: 700 1.05rem/1 var(--display); background: linear-gradient(140deg, #a88af5, #6a4bd0);
-  box-shadow: 0 6px 16px rgba(106, 75, 208, .35), inset 0 1px 0 rgba(255, 255, 255, .35);
-}
+.logo { width: 2.3rem; height: 2.3rem; color: var(--accent); flex: none; }
 .brandtext { display: flex; flex-direction: column; gap: .2rem; }
 .wordmark { font: 800 1.35rem/1 var(--body); letter-spacing: .02em; color: var(--ink); }
 .wordmark i { font-style: normal; color: var(--accent); }
-.logo { font-family: var(--body); font-weight: 800; font-size: .82rem; letter-spacing: .04em; }
 .navgroup { display: flex; flex-direction: column; gap: .15rem; }
 .navlink {
   display: flex; align-items: center; gap: .7rem; padding: .55rem .65rem; border-radius: var(--r-s);
@@ -176,7 +171,7 @@ main { padding: 2.2rem clamp(1.2rem, 3.5vw, 3rem) 5rem; outline: none; min-width
 .bar .s-P2 { background: linear-gradient(90deg, #f0a160, var(--p2)); }
 .bar .s-P3 { background: linear-gradient(90deg, #9a7cf0, var(--p3)); }
 .bar .s-P4 { background: var(--p4); }
-.bar .tick { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255, 255, 255, .85); }
+.bar .tick { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--solid); }
 .legend { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; margin-top: .65rem; font-size: .78rem; color: var(--muted); }
 .legend .end { margin-left: auto; }
 .lg { display: inline-flex; align-items: center; gap: .35rem; }

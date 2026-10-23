@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/hq-wordmark-dark.svg">
+  <img src="docs/img/hq-wordmark.svg" alt="HQ" width="220">
+</picture>
+
 # hq
 
 A plain-Markdown archive for tasks, bugs, presentations, learnings and skills,
