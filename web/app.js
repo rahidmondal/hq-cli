@@ -110,7 +110,8 @@ async function cmd(body, okMsg) {
 async function refresh() {
   try {
     S.data = await getJSON("/api/state");
-    if (S.free) S.free.items = (await getJSON(`/api/free?minutes=${S.free.minutes}`)).items;
+    const minutes = S.free?.minutes ?? (Number(localStorage.getItem("hq.free")) || 30);
+    S.free = { minutes, items: (await getJSON(`/api/free?minutes=${minutes}`)).items };
   } catch (e) {
     toast(e.message, true);
     return;
@@ -146,43 +147,55 @@ function row(r, when = "") {
   const late = /ago|yesterday|late/.test(when);
   const sub = [
     `<span class="area ${esc(r.area)}">${esc(r.project)}</span>`,
-    r.status === "active" ? `<span class="status-active">in progress</span>` : "",
-    r.goal ? `<span>${esc(goalTitle(r.goal))}</span>` : "",
+    r.status === "active" ? `<span class="pill live">In progress</span>` : "",
+    r.goal ? `<span class="goalref">${esc(goalTitle(r.goal))}</span>` : "",
     r.blocked ? `<span class="reason">Blocked: ${esc(r.blocked)}</span>` : "",
+  ].join("");
+  const meta = [
+    when ? `<span class="when${late ? " late" : ""}">${esc(when)}</span>` : "",
+    r.est_label ? `<span class="est">${esc(r.est_label)}</span>` : "",
   ].join("");
   return `<div class="row item" data-project="${esc(r.project)}" data-slug="${esc(r.slug)}" data-t="${esc(searchText(r))}">
     ${prioSelect(r)}
     <div class="main" data-open><div class="title">${esc(r.title)}</div><div class="sub">${sub}</div></div>
-    <div class="when${late ? " late" : ""}">${esc(when)}</div>
-    <div class="est">${esc(r.est_label || "")}</div>
+    <div class="meta">${meta}</div>
     <div class="acts">${rowActions(r)}</div>
   </div>`;
 }
 
-function head(title, extra = "") {
-  return `<div class="head"><h1>${esc(title)}</h1>${extra}
-    <input class="search" type="search" placeholder="Search  ( / )" value="${esc(S.q)}" aria-label="Search"></div>
-    ${mobileAreas()}`;
+function search(placeholder = "Search") {
+  return `<label class="searchwrap"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+    <input class="search" type="search" placeholder="${esc(placeholder)}" value="${esc(S.q)}" aria-label="Search"><kbd>/</kbd></label>`;
+}
+
+function head(title, sub = "", extra = "") {
+  return `<header class="head"><div><h1>${esc(title)}</h1>${sub ? `<p class="lede">${sub}</p>` : ""}</div>
+    <div class="headtools">${extra}${search()}</div></header>${mobileAreas()}`;
 }
 
 function mobileAreas() {
-  const b = (v, label) => `<button type="button" class="btn${S.area === v ? " primary" : ""}" data-area="${v}">${label}</button>`;
-  return `<div class="mobile-areas" role="group" aria-label="Area">${b("", "All")}${b("work", "Work")}${b("personal", "Personal")}</div>`;
+  const b = (v, label) => `<button type="button" aria-pressed="${S.area === v}" data-area="${v}">${label}</button>`;
+  return `<div class="mobile-areas areas" role="group" aria-label="Area">${b("", "All")}${b("work", "Work")}${b("personal", "Personal")}</div>`;
+}
+
+function plural(n, one, many = one + "s") {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 // ---- Today ------------------------------------------------------------------
 
-function renderToday() {
-  const d = S.data;
-  const day = parseISO(d.today);
-  const sections = d.sections
+const SECTION_TONE = { due: "rose", planned: "violet", goals: "amber", top: "teal" };
+
+function todayParts() {
+  const sections = S.data.sections
     .map((s) => ({ ...s, items: s.items.filter(inArea) }))
     .filter((s) => s.items.length);
-  const doing = sections.filter((s) => s.key !== "blocked").flatMap((s) => s.items);
-  const blocked = sections.find((s) => s.key === "blocked")?.items.length || 0;
-  const work = doing.filter((r) => r.area === "work").length;
-  const personal = doing.length - work;
+  const blocked = sections.find((s) => s.key === "blocked")?.items || [];
+  const lists = sections.filter((s) => s.key !== "blocked");
+  return { lists, blocked, doing: lists.flatMap((s) => s.items) };
+}
 
+function budgetCard(doing, blockedCount) {
   const byP = { P1: 0, P2: 0, P3: 0, P4: 0 };
   let total = 0, noEst = 0;
   for (const r of doing) {
@@ -193,56 +206,100 @@ function renderToday() {
     .map(([p, m]) => `<span class="s-${p}" style="width:${(m / scale) * 100}%" title="${p}: ${fmtMinutes(m)}"></span>`).join("");
   const ticks = Array.from({ length: Math.floor(scale / 60) - 1 }, (_, i) =>
     `<i class="tick" style="left:${(((i + 1) * 60) / scale) * 100}%"></i>`).join("");
-  const freeMin = S.free?.minutes ?? (Number(localStorage.getItem("hq.free")) || 30);
-
-  const tally = [
-    work ? `<div><b>${work}</b> work</div>` : "",
-    personal ? `<div><b>${personal}</b> personal</div>` : "",
-    blocked ? `<div><b>${blocked}</b> blocked</div>` : "",
-  ].join("") || "<div>Nothing on the list</div>";
-
-  let html = `<div class="page">
-    <div class="day">
-      <div class="weekday">${esc(day.toLocaleDateString(undefined, { weekday: "long" }))}</div>
-      <h1 class="date">${esc(day.toLocaleDateString(undefined, { day: "numeric", month: "long" }))}</h1>
-      <div class="tally">${tally}</div>
-      <div class="budget">
-        <div class="bar" role="img" aria-label="${fmtMinutes(total)} estimated today">${segs}${ticks}</div>
-        <div class="budget-row">
-          <span><span class="total">${total ? fmtMinutes(total) : "No time"}</span> estimated${noEst ? `, ${noEst} without an estimate` : ""}</span>
-          <form class="free" data-form="free">
-            <label for="freemin">I've got</label>
-            <input id="freemin" name="minutes" type="number" min="5" step="5" value="${freeMin}">
-            <span>minutes</span>
-            <button class="btn" type="submit">Show what fits</button>
-          </form>
-        </div>
-      </div>
+  const legend = Object.entries(byP).filter(([, m]) => m)
+    .map(([p, m]) => `<span class="lg"><i class="dot ${p}"></i>${p} ${fmtMinutes(m)}</span>`).join("");
+  const work = doing.filter((r) => r.area === "work").length;
+  const stats = [
+    [doing.length, doing.length === 1 ? "to do" : "to do"],
+    [work, "work"], [doing.length - work, "personal"], [blockedCount, "blocked"],
+  ].map(([n, label]) => `<div class="stat"><b>${n}</b><span>${label}</span></div>`).join("");
+  let note = doing.length ? "Everything has an estimate" : "Nothing planned yet";
+  if (noEst) note = `${plural(noEst, "task")} without an estimate`;
+  if (total > DAY_MINUTES) note += ", more than an 8-hour day";
+  return `<section class="budget glass">
+    <div class="budget-top">
+      <div><div class="budget-total">${total ? fmtMinutes(total) : "No time"} <span>estimated</span></div>
+        <div class="budget-note">${note}</div></div>
+      <div class="stats">${stats}</div>
     </div>
-    ${mobileAreas()}
-    <input class="search" type="search" placeholder="Search today  ( / )" value="${esc(S.q)}" aria-label="Search"${S.q ? "" : " hidden"}>`;
+    <div class="bar" role="img" aria-label="${fmtMinutes(total)} estimated today">${segs}${ticks}</div>
+    <div class="legend">${legend || '<span class="lg">Add estimates to see your day fill up</span>'}<span class="lg end">8-hour day</span></div>
+  </section>`;
+}
 
-  if (S.free) {
-    const items = S.free.items.filter(inArea).slice(0, 5);
-    html += `<section class="section free-picks"><h2>Fits in ${esc(fmtMinutes(S.free.minutes))}
-      <span class="count">${items.length ? "best first" : ""}</span>
-      <button class="btn quiet" data-do="close-free" style="margin-left:auto">Close</button></h2>
-      ${items.length ? items.map((r) => row(r, r.due ? relDue(r.due) : "")).join("")
-        : `<p class="sub" style="color:var(--muted)">Nothing with an estimate fits in ${esc(fmtMinutes(S.free.minutes))}. Give entries an estimate in their details to see them here.</p>`}
-    </section>`;
-  }
+function freeCard() {
+  const minutes = S.free?.minutes ?? 30;
+  const items = (S.free?.items || []).filter(inArea).slice(0, 4);
+  const chips = [15, 30, 60, 90].map((m) =>
+    `<button type="button" class="chip${m === minutes ? " on" : ""}" data-free="${m}">${fmtMinutes(m)}</button>`).join("");
+  const list = items.length
+    ? items.map((r) => `<div class="mini item" data-project="${esc(r.project)}" data-slug="${esc(r.slug)}" data-t="${esc(searchText(r))}" data-open>
+        <i class="dot ${esc(r.priority)}"></i><span class="mtitle">${esc(r.title)}</span><span class="mest">${esc(r.est_label)}</span></div>`).join("")
+    : `<p class="quiet">Nothing with an estimate fits in ${esc(fmtMinutes(minutes))}. Set estimates in a task's details.</p>`;
+  return `<section class="side-card glass">
+    <h3>I've got time</h3>
+    <form class="chips" data-form="free">${chips}
+      <input name="minutes" type="number" min="5" step="5" placeholder="Other" value="${[15, 30, 60, 90].includes(minutes) ? "" : minutes}"
+        class="${[15, 30, 60, 90].includes(minutes) ? "" : "on"}" aria-label="Other amount, in minutes" title="Other amount, in minutes"></form>
+    <div class="minis">${list}</div>
+  </section>`;
+}
 
-  if (!sections.length) {
-    html += `<div class="empty-state"><strong>Nothing due or planned today.</strong>
-      <p>Today fills itself from due dates, do-on dates, goal deadlines and active P1/P2 work. Plan something for today, or add a task.</p>
-      <button class="btn primary" data-act="new-task">New task</button>
-      <a class="btn" href="/board" data-nav="board">Open the board</a></div>`;
+function targetLabel(iso) {
+  const n = daysFromToday(iso);
+  return n === 0 ? "due today" : n > 0 ? `in ${n}d` : `${-n}d late`;
+}
+
+function goalsCard() {
+  const goals = S.data.goals.filter((g) => g.status === "active" && inArea(g))
+    .sort((a, b) => (a.target || "9999").localeCompare(b.target || "9999")).slice(0, 4);
+  if (!goals.length) return "";
+  return `<section class="side-card glass"><h3>Goals<a class="more" href="/goals" data-nav="goals">All goals</a></h3>
+    ${goals.map((g) => {
+      const total = g.open + g.done;
+      const pct = total ? Math.round((g.done / total) * 100) : 0;
+      return `<div class="mini goalmini" data-goal="${esc(g.slug)}" data-open>
+        <div class="gm-top"><span class="mtitle">${esc(g.title)}</span><span class="mest">${g.target ? esc(targetLabel(g.target)) : ""}</span></div>
+        <div class="progress"><span class="done" style="width:${pct}%"></span></div></div>`;
+    }).join("")}</section>`;
+}
+
+function blockedCard(blocked) {
+  if (!blocked.length) return "";
+  return `<section class="side-card glass blocked-card"><h3>Blocked<span class="count">${blocked.length}</span></h3>
+    ${blocked.map((r) => `<div class="mini item" data-project="${esc(r.project)}" data-slug="${esc(r.slug)}" data-t="${esc(searchText(r))}">
+      <div class="bm" data-open><span class="mtitle">${esc(r.title)}</span><span class="reason">${esc(r.blocked)}</span></div>
+      <button class="btn small" data-do="unblock">Unblock</button></div>`).join("")}</section>`;
+}
+
+function renderToday() {
+  const day = parseISO(S.data.today);
+  const { lists, blocked, doing } = todayParts();
+  let listHtml = "";
+  if (!lists.length) {
+    listHtml = `<div class="empty-state glass"><strong>Nothing due or planned today.</strong>
+      <p>Today fills itself from due dates, do-on dates, goal deadlines and active P1 and P2 work. Give a task a date or a priority, or add one.</p>
+      <div class="empty-actions"><button class="btn primary" data-act="new-task">New task</button>
+      <a class="btn" href="/board" data-nav="board">Open the board</a></div></div>`;
   }
-  for (const s of sections) {
-    html += `<section class="section" data-section="${esc(s.key)}"><h2>${esc(s.title)}<span class="count">${s.items.length}</span></h2>
+  for (const s of lists) {
+    listHtml += `<section class="section glass tone-${SECTION_TONE[s.key] || "violet"}" data-section="${esc(s.key)}">
+      <h2><i class="marker"></i>${esc(s.title)}<span class="count">${s.items.length}</span></h2>
       ${s.items.map((r) => row(r, r.when)).join("")}</section>`;
   }
-  return html + "</div>";
+  return `<div class="page today">
+    <header class="hero">
+      <div><div class="weekday">${esc(day.toLocaleDateString(undefined, { weekday: "long" }))}</div>
+        <h1 class="date">${esc(day.toLocaleDateString(undefined, { day: "numeric", month: "long" }))}</h1></div>
+      <div class="headtools">${search("Search today")}</div>
+    </header>
+    ${mobileAreas()}
+    ${budgetCard(doing, blocked.length)}
+    <div class="today-grid">
+      <div class="today-main">${listHtml}</div>
+      <aside class="today-side">${freeCard()}${goalsCard()}${blockedCard(blocked)}</aside>
+    </div>
+  </div>`;
 }
 
 // ---- Board ------------------------------------------------------------------
@@ -253,58 +310,66 @@ function card(r) {
     `<span class="area ${esc(r.area)}">${esc(r.area)}</span>`,
     r.due && r.status !== "archive" ? `<span${daysFromToday(r.due) < 0 ? ' class="reason"' : ""}>${esc(relDue(r.due))}</span>` : "",
     r.est_label ? `<span>${esc(r.est_label)}</span>` : "",
-    r.kind && r.kind !== "task" ? `<span>${esc(r.kind)}</span>` : "",
-    r.blocked ? `<span class="reason">Blocked: ${esc(r.blocked)}</span>` : "",
+    r.kind && r.kind !== "task" ? `<span class="kind">${esc(r.kind)}</span>` : "",
     r.outcome === "dropped" ? "<span>dropped</span>" : "",
   ].join("");
   const cls = (r.blocked ? " blocked" : "") + (r.outcome === "dropped" ? " dropped" : "");
+  const reason = r.blocked ? `<div class="reason cardreason">Blocked: ${esc(r.blocked)}</div>` : "";
   return `<div class="card item${cls}" data-project="${esc(r.project)}" data-slug="${esc(r.slug)}" data-t="${esc(searchText(r))}" data-open tabindex="-1">
-    <div class="title">${esc(r.title)}</div><div class="sub">${bits}</div></div>`;
+    <div class="title">${esc(r.title)}</div>${reason}<div class="sub">${bits}</div></div>`;
 }
 
 function renderBoard() {
   const entries = S.data.entries.filter(inArea);
   const projects = [...new Set(entries.map((r) => r.project))].sort();
-  let html = `<div class="page" style="max-width:1240px">${head("Board")}`;
-  if (!projects.length) html += `<div class="empty-state"><strong>No entries${S.area ? ` in ${esc(S.area)}` : ""}.</strong></div>`;
+  const open = entries.filter((r) => r.status !== "archive").length;
+  const lede = `${plural(open, "open entry", "open entries")} across ${plural(projects.length, "project")}. Drag a card to move it.`;
+  let html = `<div class="page wide">${head("Board", lede)}`;
+  if (!projects.length) html += `<div class="empty-state glass"><strong>No entries${S.area ? ` in ${esc(S.area)}` : ""}.</strong></div>`;
   for (const p of projects) {
     const mine = entries.filter((r) => r.project === p);
+    const count = (st) => mine.filter((r) => r.status === st).length;
     const col = (status, label) => {
       const rows = mine.filter((r) => r.status === status).sort(status === "archive"
         ? (a, b) => String(b.created).localeCompare(String(a.created)) : byPriority);
-      const cards = rows.map(card).join("") || `<div class="sub" style="color:var(--muted);font-size:.85rem">Nothing here</div>`;
-      const h = `${label} <span class="count">${rows.length}</span>`;
+      const cards = rows.map(card).join("") || `<div class="dropzone">${status === "archive" ? "Nothing archived" : "Drop a card here"}</div>`;
+      const h = `<i class="coldot"></i>${label}<span class="count">${rows.length}</span>`;
       return status === "archive"
-        ? `<details class="col archive" data-drop="archive" data-project="${esc(p)}"><summary>${h}</summary>${cards}</details>`
+        ? `<details class="col archive" data-drop="archive" data-project="${esc(p)}"><summary>${h}<span class="toggle"></span></summary>${cards}</details>`
         : `<div class="col ${status}" data-drop="${status}" data-project="${esc(p)}"><h3>${h}</h3>${cards}</div>`;
     };
-    html += `<section class="project"><h2>${esc(p)}</h2><div class="board">
-      ${col("planning", "Planning")}${col("active", "In progress")}${col("archive", "Archive")}</div></section>`;
+    const area = S.data.projects.find((x) => x.name === p)?.area || "work";
+    html += `<section class="project glass"><header class="projhead"><h2><span class="area ${esc(area)}"></span>${esc(p)}</h2>
+      <span class="projnums">${count("planning")} planned, ${count("active")} in progress, ${count("archive")} archived</span></header>
+      <div class="board">${col("planning", "Planning")}${col("active", "In progress")}${col("archive", "Archive")}</div></section>`;
   }
   return html + "</div>";
 }
 
 // ---- Goals ------------------------------------------------------------------
 
-function goalRow(g) {
+function goalCard(g) {
   const total = g.open + g.done + g.dropped;
   const pct = (n) => (total ? (n / total) * 100 : 0);
+  const donePct = g.open + g.done ? Math.round((g.done / (g.open + g.done)) * 100) : 0;
   let target = "No target date", cls = "";
   if (g.target) {
     const n = daysFromToday(g.target);
-    target = n === 0 ? "Due today" : n > 0 ? `Due in ${n} days` : `${-n} days late`;
-    cls = g.status !== "active" ? "" : n < 0 ? "late" : n <= 7 ? "soon" : "";
+    target = n === 0 ? "Due today" : n > 0 ? `Due in ${plural(n, "day")}` : `${plural(-n, "day")} late`;
+    cls = n < 0 ? "late" : n <= 7 ? "soon" : "";
   }
-  if (g.status !== "active") target = g.status === "done" ? "Done" : "Dropped";
+  if (g.status !== "active") { target = g.status === "done" ? "Done" : "Dropped"; cls = "closed"; }
   const nums = total
     ? `${g.done} of ${g.open + g.done} done${g.blocked ? `, ${g.blocked} blocked` : ""}${g.dropped ? `, ${g.dropped} dropped` : ""}`
     : "No tasks yet";
-  return `<div class="goal item${g.status !== "active" ? " closed" : ""}" data-goal="${esc(g.slug)}" data-t="${esc((g.title + " " + g.slug + " " + g.area).toLowerCase())}" data-open tabindex="-1">
-    <span class="tag-prio ${esc(g.priority)}">${esc(g.priority)}</span>
-    <div><div class="title">${esc(g.title)}</div><div class="nums"><span class="area ${esc(g.area)}">${esc(g.area)}</span> ${esc(nums)}</div></div>
-    <div><div class="progress"><span class="done" style="width:${pct(g.done)}%"></span><span class="dropped" style="width:${pct(g.dropped)}%"></span></div></div>
-    <div class="target ${cls}">${esc(target)}${g.target ? `<div style="font-size:.74rem">${esc(shortDate(g.target))}</div>` : ""}</div>
-  </div>`;
+  return `<article class="goalcard glass item${g.status !== "active" ? " closed" : ""}" data-goal="${esc(g.slug)}" data-t="${esc((g.title + " " + g.slug + " " + g.area).toLowerCase())}" data-open tabindex="-1">
+    <div class="gc-top"><span class="tag-prio ${esc(g.priority)}">${esc(g.priority)}</span><span class="area ${esc(g.area)}">${esc(g.area)}</span>
+      <span class="target ${cls}">${esc(target)}</span></div>
+    <h3>${esc(g.title)}</h3>
+    <div class="gc-progress"><div class="progress"><span class="done" style="width:${pct(g.done)}%"></span><span class="dropped" style="width:${pct(g.dropped)}%"></span></div>
+      <b>${donePct}%</b></div>
+    <div class="gc-foot"><span>${esc(nums)}</span>${g.target ? `<span>${esc(shortDate(g.target))}</span>` : ""}</div>
+  </article>`;
 }
 
 function renderGoals() {
@@ -312,14 +377,15 @@ function renderGoals() {
   const active = goals.filter((g) => g.status === "active").sort((a, b) =>
     prioRank(a.priority) - prioRank(b.priority) || (a.target || "9999").localeCompare(b.target || "9999"));
   const closed = goals.filter((g) => g.status !== "active");
-  let html = `<div class="page">${head("Goals", `<button class="btn primary" data-act="new-goal">New goal</button>`)}`;
+  let html = `<div class="page">${head("Goals", "Goals group tasks across projects. Tasks in a goal due within a week show up on Today.",
+    `<button class="btn primary" data-act="new-goal">New goal</button>`)}`;
   if (!goals.length) {
-    html += `<div class="empty-state"><strong>No goals yet.</strong>
-      <p>A goal groups tasks across projects and gives them a target date. Tasks in a goal due within a week show up on Today.</p>
-      <button class="btn primary" data-act="new-goal">New goal</button></div>`;
+    html += `<div class="empty-state glass"><strong>No goals yet.</strong>
+      <p>Create one, then pick it in a task's details.</p>
+      <div class="empty-actions"><button class="btn primary" data-act="new-goal">New goal</button></div></div>`;
   }
-  if (active.length) html += `<section class="section"><h2>Active<span class="count">${active.length}</span></h2>${active.map(goalRow).join("")}</section>`;
-  if (closed.length) html += `<section class="section"><h2>Closed<span class="count">${closed.length}</span></h2>${closed.map(goalRow).join("")}</section>`;
+  if (active.length) html += `<h2 class="group-title">Active<span class="count">${active.length}</span></h2><div class="goalgrid">${active.map(goalCard).join("")}</div>`;
+  if (closed.length) html += `<h2 class="group-title">Closed<span class="count">${closed.length}</span></h2><div class="goalgrid">${closed.map(goalCard).join("")}</div>`;
   return html + "</div>";
 }
 
@@ -332,6 +398,12 @@ function render() {
   $$(".navlink").forEach((a) => (a.dataset.nav === S.page
     ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
   $$(".areas button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.area === S.area)));
+  const counts = {
+    today: todayParts().doing.length,
+    board: S.data.entries.filter((r) => r.status !== "archive" && inArea(r)).length,
+    goals: S.data.goals.filter((g) => g.status === "active" && inArea(g)).length,
+  };
+  $$("[data-count]").forEach((el) => (el.textContent = counts[el.dataset.count] || ""));
   applySearch();
   select(S.sel, false);
 }
@@ -339,8 +411,7 @@ function render() {
 function applySearch() {
   const q = S.q.trim().toLowerCase();
   $$(".item", main).forEach((el) => (el.hidden = !!q && !(el.dataset.t || "").includes(q)));
-  $$(".section, .project", main).forEach((sec) => {
-    if (sec.classList.contains("free-picks")) return;
+  $$(".section, .project, .side-card", main).forEach((sec) => {
     sec.hidden = !!q && !sec.querySelector(".item:not([hidden])");
   });
   $$("details.col", main).forEach((d) => { if (q && d.querySelector(".item:not([hidden])")) d.open = true; });
@@ -548,6 +619,13 @@ dialog.addEventListener("submit", async (ev) => {
 
 // ---- events -------------------------------------------------------------------
 
+function setFree(value) {
+  const minutes = Math.max(5, Math.round(Number(value) || 30));
+  localStorage.setItem("hq.free", String(minutes));
+  getJSON(`/api/free?minutes=${minutes}`).then((r) => { S.free = { minutes, items: r.items }; render(); })
+    .catch((e) => toast(e.message, true));
+}
+
 async function doAction(what, ref) {
   const base = ref.goal ? { goal: ref.goal } : { project: ref.project, slug: ref.slug };
   switch (what) {
@@ -578,6 +656,8 @@ document.addEventListener("click", (ev) => {
     S.sel = -1;
     return render();
   }
+  const chip = t.closest("[data-free]");
+  if (chip) return setFree(chip.dataset.free);
   const act = t.closest("[data-act]");
   if (act) {
     if (act.dataset.act === "new-task") return openNewTask(act.dataset.goalDefault || "");
@@ -587,7 +667,6 @@ document.addEventListener("click", (ev) => {
   if (btn) {
     const what = btn.dataset.do;
     if (what === "close") return closeDrawer();
-    if (what === "close-free") { S.free = null; return render(); }
     if (what === "show-block") {
       const box = drawer.querySelector("[data-form=block]");
       box.hidden = false;
@@ -627,13 +706,7 @@ document.addEventListener("submit", (ev) => {
   if (dialog.contains(form)) return;
   ev.preventDefault();
   const kind = form.dataset.form;
-  if (kind === "free") {
-    const minutes = Math.max(5, Math.round(Number(form.minutes.value) || 30));
-    localStorage.setItem("hq.free", String(minutes));
-    getJSON(`/api/free?minutes=${minutes}`).then((r) => { S.free = { minutes, items: r.items }; render(); })
-      .catch((e) => toast(e.message, true));
-    return;
-  }
+  if (kind === "free") return setFree(form.minutes.value);
   const ref = refOf(form);
   if (!ref) return;
   const base = ref.goal ? { goal: ref.goal } : ref;
@@ -654,7 +727,6 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape") {
     if (typing) return ev.target.blur();
     if (S.drawer) return closeDrawer();
-    if (S.free) { S.free = null; return render(); }
     if (S.q) { S.q = ""; return render(); }
     return;
   }
@@ -662,7 +734,6 @@ document.addEventListener("keydown", (ev) => {
   const keys = {
     "/": () => {
       const box = main.querySelector(".search");
-      box.hidden = false;
       box.focus();
       box.select();
     },
