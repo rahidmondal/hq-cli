@@ -88,12 +88,30 @@ def _unquote(value: str) -> str:
     return value
 
 
+def _existing_newline(path: Path) -> str | None:
+    """The line ending an existing file uses consistently, else None (platform default)."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    crlf = data.count(b"\r\n")
+    lf = data.count(b"\n") - crlf
+    if crlf and not lf:
+        return "\r\n"
+    if lf and not crlf:
+        return "\n"
+    return None
+
+
 def atomic_write_text(path: Path, text: str) -> None:
-    """Write text to path via a sibling temp file and os.replace."""
+    """Write text to path via a sibling temp file and os.replace.
+    In advanced mode, rewriting an existing file keeps its line endings;
+    classic writes the platform default, as v1 did."""
     path = Path(path)
+    newline = _existing_newline(path) if mode() == "advanced" else None
     tmp = path.parent / f".{path.name}.tmp-{os.getpid()}"
     try:
-        with tmp.open("w", encoding="utf-8") as f:
+        with tmp.open("w", encoding="utf-8", newline=newline) as f:
             f.write(text)
         os.replace(tmp, path)
     except BaseException:

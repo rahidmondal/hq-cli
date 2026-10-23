@@ -126,7 +126,10 @@ classic mode print `hq: '<cmd>' needs advanced mode` and exit 1.
 | `hq check` | `--json` | Scan the archive for problems. |
 
 `<ref>` is a slug or any unique substring of one; an ambiguous ref is an error
-that lists the matches.
+that lists the matches. An exact slug wins over longer ones, except that a bare
+name matching a goal and part of an entry's slug is ambiguous: use
+`goal/<slug>` for the goal. Edits keep each file's existing line endings, and
+setting a field to the value it already has changes nothing and logs nothing.
 
 **Who acted.** The top-level `--by user|agent|web` flag (or the `HQ_ACTOR`
 environment variable, default `user`) tags each log line with `"by"`, e.g.

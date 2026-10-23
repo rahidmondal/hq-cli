@@ -61,13 +61,20 @@ def resolve_ref(ref: str, project: str | None = None, goals: bool = True,
                          if any(c.status == st for c in exact))
         wanted = "/".join(statuses) or "a goal"
         raise HqError(f"'{text}' is {found}, not {wanted}")
+    if matches and not goals_only and all(m.kind == "goal" for m in matches):
+        # A bare name that is exactly a goal but also part of an entry's slug
+        # is ambiguous: the user may mean the entry. `goal/<slug>` picks the goal.
+        matches += [c for c in candidates if c.kind == "entry" and needle in c.slug.lower()]
     if not matches:
         matches = [c for c in candidates if needle and needle in c.slug.lower()]
     if not matches:
         raise HqError(f"nothing matches '{ref}'")
     if len(matches) > 1:
         labels = ", ".join(sorted(m.label() for m in matches))
-        raise HqError(f"ambiguous ref '{ref}': {labels} (be more specific or use --project)")
+        hint = "be more specific or use --project"
+        if any(m.kind == "goal" for m in matches):
+            hint += "; goal/<slug> picks a goal"
+        raise HqError(f"ambiguous ref '{ref}': {labels} ({hint})")
     return matches[0]
 
 
@@ -144,6 +151,8 @@ def set_field(ref: str, field: str, value: str, project: str | None = None) -> P
         raise HqError(f"unknown goal '{new}'")
     meta, body = _read(r)
     old = meta.get(field)
+    if old == new or (clear and old is None):
+        return r.path  # already set: no write, no log line
     if clear:
         meta.pop(field, None)
     else:
