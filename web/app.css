@@ -328,3 +328,17 @@ dialog::backdrop { background: rgba(70, 50, 130, .22); -webkit-backdrop-filter: 
   .rail { background: rgba(255, 255, 255, .72); border-top: 1px solid var(--glass-edge); }
   .section, .project { padding: .8rem .7rem .4rem; }
 }
+
+/* ---- drag and drop ---- */
+.board .col:not(.archive) .card { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: pan-y; }
+.card.dragging { opacity: .35; }
+.drag-ghost {
+  position: fixed; top: 0; left: 0; z-index: 30; pointer-events: none; margin: 0;
+  background: rgba(255, 255, 255, .92); border-color: var(--accent);
+  box-shadow: 0 18px 40px rgba(92, 68, 168, .28);
+}
+body.is-dragging, body.is-dragging * { cursor: grabbing !important; }
+.col { border-radius: var(--radius-s); transition: background .12s, box-shadow .12s; min-height: 4rem; }
+.col.drop-ok { background: rgba(122, 90, 216, .10); box-shadow: inset 0 0 0 2px rgba(122, 90, 216, .45); }
+.col.drop-no { background: rgba(207, 58, 106, .06); box-shadow: inset 0 0 0 2px rgba(207, 58, 106, .35); }
+.board .col:not(.archive) .card { cursor: grab; }

@@ -196,7 +196,8 @@ In advanced mode `hq serve` opens the v2 app instead (the v1 board is still at
   the day's estimated time by priority; **I've got N minutes** lists the open
   tasks whose estimate fits.
 - **Board** is the v1 board with priority, area, due, estimate and blocked
-  shown on each card. **Goals** shows each goal's progress and target date.
+  shown on each card. Drag a card between columns to start it, move it back to
+  planning, or archive it as done (long-press first on a touch screen). **Goals** shows each goal's progress and target date.
 - Click any entry or goal to open its details: change priority, area,
   estimate, due, do-on and goal; start, finish, drop, block or unblock it; add
   a note; see its recent activity and its notes.

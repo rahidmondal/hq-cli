@@ -275,8 +275,8 @@ function renderBoard() {
       const cards = rows.map(card).join("") || `<div class="sub" style="color:var(--muted);font-size:.85rem">Nothing here</div>`;
       const h = `${label} <span class="count">${rows.length}</span>`;
       return status === "archive"
-        ? `<details class="col archive"><summary>${h}</summary>${cards}</details>`
-        : `<div class="col ${status}"><h3>${h}</h3>${cards}</div>`;
+        ? `<details class="col archive" data-drop="archive" data-project="${esc(p)}"><summary>${h}</summary>${cards}</details>`
+        : `<div class="col ${status}" data-drop="${status}" data-project="${esc(p)}"><h3>${h}</h3>${cards}</div>`;
     };
     html += `<section class="project"><h2>${esc(p)}</h2><div class="board">
       ${col("planning", "Planning")}${col("active", "In progress")}${col("archive", "Archive")}</div></section>`;
@@ -567,6 +567,7 @@ async function doAction(what, ref) {
 }
 
 document.addEventListener("click", (ev) => {
+  if (drag.justDropped) { drag.justDropped = false; ev.preventDefault(); return; }
   const t = ev.target;
   const nav = t.closest("[data-nav]");
   if (nav && !ev.ctrlKey && !ev.metaKey) { ev.preventDefault(); closeDrawer(); return go(nav.dataset.nav); }
@@ -698,3 +699,103 @@ addEventListener("focus", () => idle() && refresh());
 setInterval(() => document.visibilityState === "visible" && idle() && refresh(), 60000);
 
 refresh();
+
+// ---- drag and drop on the Board ----------------------------------------------
+// Pointer events (not HTML5 drag and drop) so it works with a mouse and touch.
+// A card moves only within its own project:
+//   planning -> active: start    active -> planning: unstart
+//   planning/active -> archive: archive (done)
+// Archived cards can't be dragged: hq has no command to un-archive.
+
+const MOVES = {
+  "planning>active": { action: "start", msg: "Started" },
+  "active>planning": { action: "unstart", msg: "Moved back to planning" },
+  "planning>archive": { action: "archive", msg: "Marked done" },
+  "active>archive": { action: "archive", msg: "Marked done" },
+};
+const drag = { card: null, ghost: null, from: null, startX: 0, startY: 0, active: false, over: null, justDropped: false,
+  touch: false, timer: 0 };
+const LONG_PRESS_MS = 350;
+
+function dropTarget(x, y) {
+  const el = document.elementFromPoint(x, y);
+  const col = el && el.closest("[data-drop]");
+  if (!col || col.dataset.project !== drag.card.dataset.project) return null;
+  return col;
+}
+
+function startDrag() {
+  drag.active = true;
+  const r = drag.card.getBoundingClientRect();
+  drag.ghost = drag.card.cloneNode(true);
+  drag.ghost.classList.add("drag-ghost");
+  drag.ghost.style.width = `${r.width}px`;
+  drag.offX = drag.startX - r.left;
+  drag.offY = drag.startY - r.top;
+  drag.ghost.style.transform = `translate(${r.left}px, ${r.top}px) rotate(1.5deg)`;
+  document.body.appendChild(drag.ghost);
+  drag.card.classList.add("dragging");
+  document.body.classList.add("is-dragging");
+  if (drag.touch) navigator.vibrate?.(15);
+}
+
+function endDrag() {
+  clearTimeout(drag.timer);
+  drag.ghost?.remove();
+  drag.card?.classList.remove("dragging");
+  drag.over?.classList.remove("drop-ok", "drop-no");
+  document.body.classList.remove("is-dragging");
+  Object.assign(drag, { card: null, ghost: null, from: null, active: false, over: null });
+}
+
+main.addEventListener("pointerdown", (ev) => {
+  if (S.page !== "board" || ev.button !== 0) return;
+  const card = ev.target.closest(".card");
+  const col = card && card.closest("[data-drop]");
+  if (!card || !col || col.dataset.drop === "archive") return;
+  const touch = ev.pointerType !== "mouse";
+  Object.assign(drag, { card, from: col.dataset.drop, startX: ev.clientX, startY: ev.clientY, active: false, touch });
+  // Touch: a long press picks the card up, so a normal swipe still scrolls.
+  if (touch) drag.timer = setTimeout(() => drag.card && startDrag(), LONG_PRESS_MS);
+});
+
+addEventListener("pointermove", (ev) => {
+  if (!drag.card) return;
+  if (!drag.active) {
+    const moved = Math.hypot(ev.clientX - drag.startX, ev.clientY - drag.startY);
+    if (drag.touch) { if (moved > 8) endDrag(); return; } // scrolling, not dragging
+    if (moved < 6) return;
+    startDrag();
+  }
+  ev.preventDefault();
+  drag.ghost.style.transform = `translate(${ev.clientX - drag.offX}px, ${ev.clientY - drag.offY}px) rotate(1.5deg)`;
+  const col = dropTarget(ev.clientX, ev.clientY);
+  if (col !== drag.over) {
+    drag.over?.classList.remove("drop-ok", "drop-no");
+    drag.over = col;
+    if (col && col.dataset.drop !== drag.from) {
+      col.classList.add(MOVES[`${drag.from}>${col.dataset.drop}`] ? "drop-ok" : "drop-no");
+    }
+  }
+}, { passive: false });
+
+addEventListener("pointerup", async (ev) => {
+  if (!drag.card) return;
+  if (!drag.active) { endDrag(); return; } // a plain click: let it open the details
+  drag.justDropped = true;
+  setTimeout(() => (drag.justDropped = false), 50);
+  const col = dropTarget(ev.clientX, ev.clientY);
+  const move = col && MOVES[`${drag.from}>${col.dataset.drop}`];
+  const ref = { project: drag.card.dataset.project, slug: drag.card.dataset.slug };
+  if (col && col.dataset.drop !== drag.from && !move) toast("That move isn't possible", true);
+  const under = document.elementFromPoint(ev.clientX, ev.clientY)?.closest("[data-drop]");
+  if (!col && under && under.dataset.project !== ref.project) toast("Cards can only move within their own project", true);
+  endDrag();
+  if (move) await cmd({ action: move.action, ...ref }, move.msg);
+});
+
+addEventListener("pointercancel", endDrag);
+// Once a touch drag is live, stop the page from scrolling under the finger.
+addEventListener("touchmove", (ev) => { if (drag.active) ev.preventDefault(); }, { passive: false });
+main.addEventListener("contextmenu", (ev) => { if (drag.card) ev.preventDefault(); });
+addEventListener("keydown", (ev) => { if (ev.key === "Escape" && drag.active) { drag.justDropped = true; endDrag(); } }, true);
