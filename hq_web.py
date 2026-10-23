@@ -100,16 +100,26 @@ def free(minutes: int) -> list[dict]:
     return [_item(p) if p.get("type") == "reading" else {**_record(p), "type": "entry"} for p in picks]
 
 
-def calendar(month: str | None) -> dict:
-    """The month grid (Monday-first weeks covering the month): event
-    occurrences and saved day summaries. Due/do-on/targets come from state."""
-    try:
-        first = date.fromisoformat((month or date.today().isoformat()[:7]) + "-01")
-    except ValueError:
-        raise HqError(f"bad month {month!r} (use YYYY-MM)")
-    _, last = hq_day.month_range(first)
-    start = first - timedelta(days=first.weekday())
-    end = last + timedelta(days=6 - last.weekday())
+def calendar(month: str | None = None, week: str | None = None) -> dict:
+    """A Monday-first grid: the weeks covering `month` (YYYY-MM), or the one
+    week containing `week` (a date). Event occurrences and saved day summaries;
+    due/do-on/targets come from state. Also the timeline for the period
+    (the month itself, or the week)."""
+    if week:
+        anchor = hq_day.parse_day(week)
+        start, end = hq_day.week_range(anchor)
+        period = (start, end)
+        label = start.isoformat()[:7]
+    else:
+        try:
+            first = date.fromisoformat((month or date.today().isoformat()[:7]) + "-01")
+        except ValueError:
+            raise HqError(f"bad month {month!r} (use YYYY-MM)")
+        _, last = hq_day.month_range(first)
+        start = first - timedelta(days=first.weekday())
+        end = last + timedelta(days=6 - last.weekday())
+        period = (first, last)
+        label = first.isoformat()[:7]
     days = {}
     d = start
     while d <= end:
@@ -118,8 +128,9 @@ def calendar(month: str | None) -> dict:
             days[d.isoformat()] = {"summary": hq_day.first_line(saved["summary"]),
                                    "templated": saved["templated"]}
         d += timedelta(days=1)
-    return {"month": first.isoformat()[:7], "start": start.isoformat(), "end": end.isoformat(),
-            "events": [_item(o) for o in hq_items.occurrences(start, end)], "days": days}
+    return {"month": label, "start": start.isoformat(), "end": end.isoformat(),
+            "events": [_item(o) for o in hq_items.occurrences(start, end)], "days": days,
+            "timeline": hq_day.timeline(*period)}
 
 
 def day(when: str | None) -> dict:
@@ -324,7 +335,7 @@ class Handler(hq_serve.Handler):
                 if path == "/api/entry":
                     return self._json(entry(query.get("project"), query.get("slug"), query.get("goal")))
                 if path == "/api/calendar":
-                    return self._json(calendar(query.get("month")))
+                    return self._json(calendar(query.get("month"), query.get("week")))
                 if path == "/api/day":
                     return self._json(day(query.get("date")))
             except HqError as e:

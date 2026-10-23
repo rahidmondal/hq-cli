@@ -65,7 +65,8 @@ def _cut(text: str, n: int, ell: str) -> str:
 def table(header: tuple, rows: list, flex: int | None = None, total: int | None = None,
           color: bool | None = None, styles: dict | None = None) -> str:
     """rows: tuples of cells, or a str for a section divider row.
-    flex: index of the column that shrinks to fit the width (default: last).
+    flex: index (or indexes) of the columns that shrink to fit the width,
+    widest first (default: the last column).
     styles: {column index: fn(cell) -> style name or None}."""
     color = color_on() if color is None else color
     total = total or width()
@@ -74,10 +75,14 @@ def table(header: tuple, rows: list, flex: int | None = None, total: int | None 
     cells = [r for r in rows if not isinstance(r, str)]
     n = len(header)
     widths = [max(len(str(r[i])) for r in [header] + cells) for i in range(n)]
-    flex = n - 1 if flex is None else flex
+    flex = (n - 1,) if flex is None else (flex,) if isinstance(flex, int) else tuple(flex)
     over = sum(widths) + 2 * (n - 1) - total
-    if over > 0:
-        widths[flex] = max(8, widths[flex] - over)
+    while over > 0:  # take a column at a time from the widest shrinkable one
+        i = max(flex, key=lambda c: widths[c])
+        if widths[i] <= 12:
+            break
+        widths[i] -= 1
+        over -= 1
 
     def paint(text: str, style: str | None) -> str:
         return f"{_STYLES[style]}{text}{_RESET}" if color and style else text

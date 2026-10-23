@@ -214,6 +214,24 @@ class DailyLoopWebTests(ServerCase):
         self.assertEqual(status, 400)
 
 
+class CalendarViewTests(ServerCase):
+    def test_week_view_and_timeline(self):
+        self.post({"action": "start", "project": "p", "slug": "write-docs"})
+        _, cal = self.get_json("/api/calendar?week=2026-10-23")
+        self.assertEqual((cal["start"], cal["end"]), ("2026-10-19", "2026-10-25"))
+        self.assertEqual(len(cal["timeline"]["days"]), 7)
+        _, cal = self.get_json("/api/calendar?week=today")
+        self.assertEqual(cal["timeline"]["total"]["started"], 1)
+        self.assertTrue(any(g["started"] == ["Write docs"] for g in cal["timeline"]["groups"]))
+        _, cal = self.get_json("/api/calendar?month=2026-02")
+        self.assertEqual((cal["timeline"]["start"], cal["timeline"]["end"]), ("2026-02-01", "2026-02-28"))
+
+    def test_theme_switch_is_in_the_page(self):
+        _, raw = self.request("GET", "/")
+        self.assertIn(b'data-act="theme"', raw)
+        self.assertIn(b"<title>HQ</title>", raw)
+
+
 class VersionTests(TempRoot):
     def test_cli_version_flag(self):
         code, out, err = run_cli(["--version"])

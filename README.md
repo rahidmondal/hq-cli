@@ -236,14 +236,17 @@ In advanced mode `hq serve` opens the v2 app instead (the v1 board is still at
   a note; see its recent activity and its notes.
 - **Today** also shows today's events, the next three links to read, and an
   **End of day** card that saves the day.
-- **Calendar** is a month grid of events, due dates, do-on dates, goal
-  targets and saved days (each with the first line of its summary). Click a
+- **Calendar** is a month or week grid of events, due dates, do-on dates,
+  goal targets and saved days (each with the first line of its summary),
+  with the period's timeline below it: counts, each day's summary, and what
+  was finished or started by goal and project. Click a
   day to see its summary, your notes and the facts, add or remove events, or
   wrap the day up. On a phone it becomes a list of the days that have
   something on them.
 - **Reading** saves links (hq fetches the title and length) and marks them
   read or dropped. **Inbox** captures thoughts and turns each one into a
   task, a goal or a link, or drops it.
+- **Light, dark or system theme**: the switch is at the bottom of the sidebar.
 - Filter by area (All / Work / Personal). Keys: `t` `b` `g` `c` `r` `i` switch
   pages, `n` new task, `/` search, `j` `k` move, `e` open, `Esc` close.
 

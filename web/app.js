@@ -24,6 +24,8 @@ const S = {
   drawer: null, // {project, slug}, {goal} or {day}
   free: null, // {minutes, items}
   month: null, // "YYYY-MM" shown on the Calendar page
+  week: null, // a date in the week shown in week view
+  calView: localStorage.getItem("hq.calview") === "week" ? "week" : "month",
   cal: null, // /api/calendar for that month
 };
 
@@ -302,8 +304,8 @@ function scheduleCard() {
 
 function readCard() {
   const unread = S.data.reading.filter((i) => i.status === "unread" && inAreaItem(i));
-  if (!unread.length) return "";
-  return `<section class="side-card glass"><h3>Intel to review<span class="count">${unread.length}</span><a class="more" href="/reading" data-nav="reading">Reading list</a></h3>
+  return `<section class="side-card glass"><h3>Intel to review${unread.length ? `<span class="count">${unread.length}</span>` : ""}<a class="more" href="/reading" data-nav="reading">Reading list</a></h3>
+    <form class="quickadd" data-form="read-add"><input name="url" type="url" placeholder="Paste a link to read later" required autocomplete="off" aria-label="Link"><button class="btn small">Save</button></form>
     ${unread.slice(0, 3).map((i) => `<a class="mini item" href="${esc(safeUrl(i.url))}" target="_blank" rel="noopener noreferrer" data-t="${esc(searchText(i))}">
       <i class="dot ${esc(i.priority)}"></i><span class="mtitle">${esc(i.title)}</span><span class="mest">${esc(i.est_label || "")}</span></a>`).join("")}
   </section>`;
@@ -514,8 +516,16 @@ function renderInbox() {
 // ---- Calendar -------------------------------------------------------------------
 
 async function loadMonth(month) {
-  S.month = month || S.month || S.data.today.slice(0, 7);
-  S.cal = await getJSON(`/api/calendar?month=${enc(S.month)}`);
+  if (month) S.month = month;
+  S.month = S.month || S.data.today.slice(0, 7);
+  S.week = S.week || S.data.today;
+  S.cal = await getJSON(S.calView === "week" ? `/api/calendar?week=${enc(S.week)}` : `/api/calendar?month=${enc(S.month)}`);
+}
+
+function shiftDays(iso, n) {
+  const d = parseISO(iso);
+  d.setDate(d.getDate() + n);
+  return isoOf(d);
 }
 
 function shiftMonth(month, n) {
@@ -539,41 +549,91 @@ function dayMarks(iso) {
   };
 }
 
+function calCell(d, iso, opts) {
+  const k = dayMarks(iso);
+  const lines = [
+    ...k.events.map((e) => `<span class="cl ev"><b>${esc(e.time ? (opts.week && e.end_time ? `${e.time}–${e.end_time}` : e.time) : "all day")}</b> ${esc(e.title)}</span>`),
+    ...k.targets.map((g) => `<span class="cl tg">◎ ${esc(g.title)}</span>`),
+    ...k.due.map((r) => `<span class="cl du">${esc(r.title)}</span>`),
+    ...k.doOn.map((r) => `<span class="cl dn">${esc(r.title)}</span>`),
+  ];
+  const limit = opts.week ? 12 : 4;
+  const extra = lines.length > limit ? `<span class="cl more">+${lines.length - limit} more</span>` : "";
+  const empty = !lines.length && !k.saved;
+  const text = [...k.events, ...k.targets, ...k.due, ...k.doOn].map((x) => x.title).join(" ") + " " + (k.saved?.summary || "");
+  const label = parseISO(iso).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+  return `<div role="button" tabindex="0" class="cell item${opts.out ? " out" : ""}${iso === S.data.today ? " now" : ""}${empty ? " empty" : ""}" data-day="${iso}"
+    data-t="${esc(text.toLowerCase())}" data-open aria-label="${esc(label)}">
+    <span class="dnum"><span class="wd">${esc(opts.name)}</span>${d.getDate()}${k.saved ? `<i class="saved" title="Debrief filed"></i>` : ""}</span>
+    ${lines.slice(0, limit).join("")}${extra}
+    ${k.saved?.summary ? `<span class="csum">${esc(k.saved.summary)}</span>` : ""}
+  </div>`;
+}
+
+function timelineCard(t, label) {
+  const tot = t.total;
+  const stats = [[tot.finished, "finished"], [tot.started, "started"], [tot.notes, "notes"], [tot.commits, "commits"]]
+    .map(([n, l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
+  const days = t.days.filter((d) => d.actions || d.commits || d.summary);
+  const dayRows = days.length ? days.map((d) => `<div class="tl-day item" data-day="${esc(d.date)}" data-open data-t="${esc((d.summary || "").toLowerCase())}">
+      <span class="tl-date">${esc(shortDate(d.date))}</span>
+      <span class="tl-nums">${[d.finished && `${d.finished} done`, d.started && `${d.started} started`, d.commits && `${d.commits} commits`].filter(Boolean).map(esc).join(" · ") || "activity"}</span>
+      <span class="tl-sum">${d.summary ? esc(firstLineOf(d.summary)) : `<i>No debrief filed</i>`}</span></div>`).join("")
+    : `<p class="quiet">Nothing recorded in this ${esc(label)} yet.</p>`;
+  let groups = "", area = null;
+  for (const g of t.groups) {
+    if (S.area && g.area !== S.area) continue;
+    if (g.area !== area) { area = g.area; groups += `<div class="tl-area"><span class="area ${esc(area)}">${esc(area)}</span></div>`; }
+    groups += `<div class="tl-group"><b>${esc(g.group)}</b>
+      <span>${g.finished.length ? `Finished ${esc(g.finished.join(", "))}` : ""}${g.finished.length && g.started.length ? ". " : ""}${g.started.length ? `Started ${esc(g.started.join(", "))}` : ""}${!g.finished.length && !g.started.length ? `${g.actions} updates` : ""}</span></div>`;
+  }
+  return `<section class="timeline glass">
+    <header class="tl-head"><div><h2>After-action report</h2><p class="quiet">${esc(shortDate(t.start))} to ${esc(shortDate(t.end))}</p></div><div class="stats">${stats}</div></header>
+    <div class="tl-cols"><div><h3>Day by day</h3>${dayRows}</div>
+      <div><h3>By goal and project</h3>${groups || `<p class="quiet">Nothing finished or started yet.</p>`}</div></div>
+  </section>`;
+}
+
+function firstLineOf(text) {
+  const line = String(text).split("\n").map((l) => l.replace(/^[-*\s]+/, "").trim()).find(Boolean) || "";
+  return line.replace(/\*\*(.+?)\*\*/g, "$1");
+}
+
 function renderCalendar() {
   if (!S.cal) return `<div class="page wide">${head("Calendar")}<p class="quiet">Loading...</p></div>`;
-  const [y, m] = S.month.split("-").map(Number);
-  const title = new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
-  const tools = `<div class="monthnav"><button class="btn quiet" data-month="${shiftMonth(S.month, -1)}" aria-label="Previous month">‹</button>
-    <button class="btn" data-month="${S.data.today.slice(0, 7)}">Today</button>
-    <button class="btn quiet" data-month="${shiftMonth(S.month, 1)}" aria-label="Next month">›</button></div>
-    <button class="btn primary" data-act="new-event">New event</button>`;
+  const week = S.calView === "week";
   const names = [];
   for (let i = 0; i < 7; i++) names.push(new Date(2026, 9, 19 + i).toLocaleDateString(undefined, { weekday: "short" }));
+  let title;
+  let nav;
+  if (week) {
+    const a = parseISO(S.cal.start), b = parseISO(S.cal.end);
+    const same = a.getMonth() === b.getMonth();
+    title = `${a.toLocaleDateString(undefined, { day: "numeric", ...(same ? {} : { month: "short" }) })} – ${b.toLocaleDateString(undefined, { day: "numeric", month: same ? "long" : "short", year: "numeric" })}`;
+    nav = `<button class="btn quiet" data-week="${shiftDays(S.cal.start, -7)}" aria-label="Previous week">‹</button>
+      <button class="btn" data-week="${S.data.today}">Today</button>
+      <button class="btn quiet" data-week="${shiftDays(S.cal.start, 7)}" aria-label="Next week">›</button>`;
+  } else {
+    const [y, m] = S.month.split("-").map(Number);
+    title = new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    nav = `<button class="btn quiet" data-month="${shiftMonth(S.month, -1)}" aria-label="Previous month">‹</button>
+      <button class="btn" data-month="${S.data.today.slice(0, 7)}">Today</button>
+      <button class="btn quiet" data-month="${shiftMonth(S.month, 1)}" aria-label="Next month">›</button>`;
+  }
+  const views = `<div class="viewswitch" role="group" aria-label="View">
+    <button type="button" data-calview="month" aria-pressed="${!week}">Month</button>
+    <button type="button" data-calview="week" aria-pressed="${week}">Week</button></div>`;
+  const tools = `${views}<div class="monthnav">${nav}</div><button class="btn primary" data-act="new-event">New event</button>`;
+  const month = week ? -1 : Number(S.month.split("-")[1]) - 1;
   let cells = "";
   for (let d = parseISO(S.cal.start); isoOf(d) <= S.cal.end; d.setDate(d.getDate() + 1)) {
-    const iso = isoOf(d);
-    const k = dayMarks(iso);
-    const out = d.getMonth() !== m - 1;
-    const lines = [
-      ...k.events.map((e) => `<span class="cl ev"><b>${esc(e.time || "all day")}</b> ${esc(e.title)}</span>`),
-      ...k.targets.map((g) => `<span class="cl tg">◎ ${esc(g.title)}</span>`),
-      ...k.due.map((r) => `<span class="cl du">${esc(r.title)}</span>`),
-      ...k.doOn.map((r) => `<span class="cl dn">${esc(r.title)}</span>`),
-    ];
-    const extra = lines.length > 4 ? `<span class="cl more">+${lines.length - 4} more</span>` : "";
-    const empty = !lines.length && !k.saved;
-    const text = [...k.events, ...k.targets, ...k.due, ...k.doOn].map((x) => x.title).join(" ") + " " + (k.saved?.summary || "");
-    cells += `<div role="button" tabindex="0" class="cell item${out ? " out" : ""}${iso === S.data.today ? " now" : ""}${empty ? " empty" : ""}" data-day="${iso}"
-      data-t="${esc(text.toLowerCase())}" data-open aria-label="${esc(parseISO(iso).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }))}">
-      <span class="dnum"><span class="wd">${esc(names[(d.getDay() + 6) % 7])}</span>${d.getDate()}${k.saved ? `<i class="saved" title="Day saved"></i>` : ""}</span>
-      ${lines.slice(0, 4).join("")}${extra}
-      ${k.saved?.summary ? `<span class="csum">${esc(k.saved.summary)}</span>` : ""}
-    </div>`;
+    cells += calCell(d, isoOf(d), { week, out: !week && d.getMonth() !== month, name: names[(d.getDay() + 6) % 7] });
   }
-  return `<div class="page wide">${head(title, "Events, due dates, planned days, goal targets and saved days. Click a day to open it.", tools)}
+  return `<div class="page wide">${head(title, "Events, due dates, planned days, goal targets and filed debriefs. Click a day to open it.", tools)}
     <div class="legendrow"><span class="lg"><i class="cdot ev"></i>Event</span><span class="lg"><i class="cdot du"></i>Due</span>
-      <span class="lg"><i class="cdot dn"></i>Planned</span><span class="lg"><i class="cdot tg"></i>Goal target</span><span class="lg"><i class="saved"></i>Day saved</span></div>
-    <div class="calgrid glass">${names.map((n) => `<div class="dow">${esc(n)}</div>`).join("")}${cells}</div></div>`;
+      <span class="lg"><i class="cdot dn"></i>Planned</span><span class="lg"><i class="cdot tg"></i>Goal target</span><span class="lg"><i class="saved"></i>Debrief filed</span></div>
+    <div class="calgrid glass${week ? " weekgrid" : ""}">${names.map((n) => `<div class="dow">${esc(n)}</div>`).join("")}${cells}</div>
+    ${timelineCard(S.cal.timeline, week ? "week" : "month")}</div>`;
 }
 
 // ---- render + search ----------------------------------------------------------
@@ -905,6 +965,23 @@ dialog.addEventListener("submit", async (ev) => {
 
 // ---- events -------------------------------------------------------------------
 
+// Theme: System -> Light -> Dark. "System" follows prefers-color-scheme.
+const THEMES = ["system", "light", "dark"];
+function applyTheme(t) {
+  if (t === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  const label = { system: "System", light: "Light", dark: "Dark" }[t];
+  $$(".themelabel").forEach((el) => (el.textContent = label));
+  $$(".themebtn").forEach((el) => (el.title = t === "system" ? "Theme: follows your system" : `Theme: ${label.toLowerCase()}`));
+}
+function cycleTheme() {
+  const now = localStorage.getItem("hq.theme") || "system";
+  const next = THEMES[(THEMES.indexOf(now) + 1) % THEMES.length];
+  if (next === "system") localStorage.removeItem("hq.theme"); else localStorage.setItem("hq.theme", next);
+  applyTheme(next);
+}
+applyTheme(localStorage.getItem("hq.theme") || "system");
+
 function setFree(value) {
   const minutes = Math.max(5, Math.round(Number(value) || 30));
   localStorage.setItem("hq.free", String(minutes));
@@ -964,6 +1041,14 @@ document.addEventListener("click", (ev) => {
   }
   const chip = t.closest("[data-free]");
   if (chip) return setFree(chip.dataset.free);
+  const calview = t.closest("[data-calview]");
+  if (calview) {
+    S.calView = calview.dataset.calview;
+    localStorage.setItem("hq.calview", S.calView);
+    return loadMonth().then(render).catch((e) => toast(e.message, true));
+  }
+  const week = t.closest("[data-week]");
+  if (week) { S.week = week.dataset.week; return loadMonth().then(render).catch((e) => toast(e.message, true)); }
   const month = t.closest("[data-month]");
   if (month) return loadMonth(month.dataset.month).then(render).catch((e) => toast(e.message, true));
   const act = t.closest("[data-act]");
@@ -972,6 +1057,7 @@ document.addEventListener("click", (ev) => {
     if (act.dataset.act === "new-goal") return openNewGoal();
     if (act.dataset.act === "new-event") return openNewEvent(S.drawer?.day);
     if (act.dataset.act === "day") return openDrawer({ day: act.dataset.date });
+    if (act.dataset.act === "theme") return cycleTheme();
   }
   const btn = t.closest("[data-do]");
   if (btn) {

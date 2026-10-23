@@ -110,11 +110,14 @@ def format_table(entries):
 def format_advanced_table(records):
     if not records:
         return "(no entries)"
-    return _render_table(
+    import hq_term
+
+    return hq_term.table(
         ("PROJECT", "STATUS", "KIND", "P", "AREA", "DUE", "SLUG", "TITLE"),
         [(r["project"] or "-", "blocked" if r["blocked"] else (r["status"] or "-"),
           r["kind"] or "-", r["priority"], r["area"], r["due"] or "-", r["slug"], r["title"])
          for r in records],
+        flex=(6, 7), styles={3: hq_term.priority_style},
     )
 
 
