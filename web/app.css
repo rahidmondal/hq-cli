@@ -1,50 +1,44 @@
-/* hq v2 browser app. Extends the v1 board palette (indigo accent, system-ui).
-   The one loud element is the Today header: a large serif date over a time
-   budget bar. Everything else is quiet rows. */
+/* hq v2 browser app: light lavender, frosted glass. Panels are translucent
+   white over a soft lavender backdrop; the one loud element is the Today
+   header, a large serif date over a time budget bar. */
 :root {
-  --paper: #f4f5f8;
-  --surface: #ffffff;
-  --ink: #1b1f27;
-  --muted: #697386;
-  --faint: #9aa3b5;
-  --line: #e2e5ec;
-  --accent: #5b5bd6;
-  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
-  --p1: #e5484d;
-  --p2: #e8890c;
-  --p3: #5b5bd6;
-  --p4: #9aa3b5;
-  --work: #0f8f86;
-  --personal: #c53b8f;
-  --blocked: #b4232a;
+  --paper: #f1ecfb;
+  --surface: rgba(255, 255, 255, .58);
+  --solid: #fbf9ff;
+  --glass-edge: rgba(255, 255, 255, .75);
+  --glass-shadow: 0 1px 1px rgba(80, 60, 140, .04), 0 10px 32px rgba(92, 68, 168, .10);
+  --blur: blur(18px) saturate(160%);
+  --ink: #2a2340;
+  --muted: #6f6789;
+  --faint: #aaa2c6;
+  --line: rgba(118, 98, 190, .16);
+  --accent: #7a5ad8;
+  --accent-soft: rgba(122, 90, 216, .12);
+  --p1: #e0457b;
+  --p2: #e98a3c;
+  --p3: #7a5ad8;
+  --p4: #a59cc4;
+  --work: #3a9e9a;
+  --personal: #c45aa8;
+  --blocked: #cf3a6a;
   --display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
   --body: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --radius-s: 6px;
-  --radius-m: 10px;
-  color-scheme: light dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #0e1015;
-    --surface: #171a22;
-    --ink: #e7e9ef;
-    --muted: #8d95a6;
-    --faint: #5d6576;
-    --line: #272c38;
-    --accent: #8383ee;
-    --p1: #f2555a;
-    --p2: #f5a524;
-    --p3: #8383ee;
-    --p4: #6b7385;
-    --work: #2bb5aa;
-    --personal: #e070b4;
-    --blocked: #f2555a;
-  }
+  --radius-s: 8px;
+  --radius-m: 14px;
+  color-scheme: light;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; }
-body { background: var(--paper); color: var(--ink); font: 15px/1.5 var(--body); }
+body {
+  color: var(--ink); font: 15px/1.5 var(--body); min-height: 100vh;
+  background:
+    radial-gradient(60vw 50vh at 8% 0%, #e3d7ff 0%, transparent 70%),
+    radial-gradient(50vw 50vh at 100% 10%, #fde2f3 0%, transparent 65%),
+    radial-gradient(60vw 60vh at 60% 100%, #d9e4ff 0%, transparent 70%),
+    var(--paper);
+  background-attachment: fixed;
+}
 a { color: inherit; text-decoration: none; }
 button, input, select, textarea { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -287,3 +281,48 @@ dialog .err { color: var(--p1); font-size: .85rem; min-height: 1.2em; margin: .5
   .drawer { padding: 1rem 1.1rem 6rem; }
 }
 .mobile-areas { display: none; margin-bottom: 1rem; }
+
+/* ---- glass ---- */
+.rail, .section, .project, .empty-state, .drawer, dialog, .toast, .search, .free input,
+.field input, .field select, .card, .btn, kbd, .key, .areas, .budget {
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+}
+.rail { background: rgba(255, 255, 255, .42); border-right: 1px solid var(--glass-edge); }
+.section, .project {
+  background: var(--surface); border: 1px solid var(--glass-edge); border-radius: var(--radius-m);
+  box-shadow: var(--glass-shadow); padding: 1rem 1.1rem .6rem;
+}
+.section > h2 { border-bottom-color: var(--line); }
+.section.free-picks { background: rgba(236, 227, 255, .72); }
+.row { border-bottom-color: var(--line); }
+.row:hover, .row.sel { background: rgba(255, 255, 255, .7); }
+.row:last-child { border-bottom: 0; }
+.budget { background: var(--surface); border: 1px solid var(--glass-edge); border-radius: var(--radius-m);
+  box-shadow: var(--glass-shadow); padding: .9rem 1rem .7rem; }
+.bar { background: rgba(122, 90, 216, .12); }
+.bar .tick { background: rgba(255, 255, 255, .9); }
+.card { background: rgba(255, 255, 255, .66); border-color: var(--glass-edge); box-shadow: 0 4px 14px rgba(92, 68, 168, .07); }
+.card:hover, .card.sel { border-color: var(--accent); background: rgba(255, 255, 255, .85); }
+.col { border-top-width: 3px; }
+.goal:hover, .goal.sel { background: rgba(255, 255, 255, .7); }
+.empty-state { background: var(--surface); border: 1.5px dashed rgba(122, 90, 216, .35); }
+.navlink[aria-current="page"], .areas button[aria-pressed="true"] { background: rgba(255, 255, 255, .8); }
+.navlink:hover { background: rgba(255, 255, 255, .55); }
+.newbtn, .btn.primary { background: linear-gradient(135deg, #8b6ce6, #6f4fd0); border-color: transparent;
+  box-shadow: 0 6px 18px rgba(111, 79, 208, .28); }
+.btn { background: rgba(255, 255, 255, .65); border-color: var(--glass-edge); }
+.btn.quiet { background: transparent; border-color: transparent; }
+.search, .free input, .field input, .field select, .blockbox input, .notebox input, dialog .titlein {
+  background: rgba(255, 255, 255, .7); border-color: var(--glass-edge);
+}
+.drawer { background: rgba(251, 249, 255, .82); border-left: 1px solid var(--glass-edge); box-shadow: -18px 0 50px rgba(92, 68, 168, .16); }
+.scrim { background: rgba(70, 50, 130, .18); }
+dialog { background: rgba(251, 249, 255, .88); border-color: var(--glass-edge); box-shadow: 0 30px 80px rgba(70, 50, 130, .25); }
+dialog::backdrop { background: rgba(70, 50, 130, .22); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+.toast { background: rgba(42, 35, 64, .88); color: #fff; }
+.prio option { background: var(--solid); }
+.md pre, .md code { background: rgba(122, 90, 216, .08); }
+@media (max-width: 760px) {
+  .rail { background: rgba(255, 255, 255, .72); border-top: 1px solid var(--glass-edge); }
+  .section, .project { padding: .8rem .7rem .4rem; }
+}
