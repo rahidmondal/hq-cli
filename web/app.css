@@ -28,6 +28,7 @@
   --blocked: #cf3a6a;
   --display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
   --body: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
   --r-s: 8px;
   --r-m: 14px;
   --r-l: 20px;
@@ -80,7 +81,11 @@ kbd, .key {
   font: 700 1.05rem/1 var(--display); background: linear-gradient(140deg, #a88af5, #6a4bd0);
   box-shadow: 0 6px 16px rgba(106, 75, 208, .35), inset 0 1px 0 rgba(255, 255, 255, .35);
 }
-.wordmark { font: 700 1.45rem/1 var(--display); letter-spacing: -.02em; color: var(--ink); }
+.brandtext { display: flex; flex-direction: column; gap: .2rem; }
+.wordmark { font: 800 1.35rem/1 var(--body); letter-spacing: .02em; color: var(--ink); }
+.wordmark i { font-style: normal; color: var(--accent); }
+.tagline { font: 600 .6rem/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+.logo { font-family: var(--body); font-weight: 800; font-size: .82rem; letter-spacing: .04em; }
 .navgroup { display: flex; flex-direction: column; gap: .15rem; }
 .navlink {
   display: flex; align-items: center; gap: .7rem; padding: .55rem .65rem; border-radius: var(--r-s);
@@ -139,7 +144,13 @@ main { padding: 2.2rem clamp(1.2rem, 3.5vw, 3rem) 5rem; outline: none; min-width
 .search::-webkit-search-cancel-button { opacity: .5; }
 
 /* ---- Today ---- */
-.hero .weekday { font: italic 400 1.15rem/1 var(--display); color: var(--muted); margin-bottom: .2rem; }
+.hero .kicker {
+  display: flex; align-items: center; gap: .55rem; margin-bottom: .7rem;
+  font: 600 .72rem/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--muted);
+}
+.kicker .sep { color: var(--faint); }
+.beacon { width: .5rem; height: .5rem; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 rgba(117, 86, 214, .5); animation: beacon 2.4s ease-out infinite; }
+@keyframes beacon { 0% { box-shadow: 0 0 0 0 rgba(117, 86, 214, .5); } 70%, 100% { box-shadow: 0 0 0 .5rem rgba(117, 86, 214, 0); } }
 .hero .date { margin: 0; font: 600 clamp(2.8rem, 6vw, 4.4rem)/.95 var(--display); letter-spacing: -.03em; }
 .budget { padding: 1.2rem 1.4rem 1rem; margin-bottom: 1.4rem; }
 .budget-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 1rem; margin-bottom: 1rem; }

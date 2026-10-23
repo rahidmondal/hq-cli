@@ -101,7 +101,7 @@ async function cmd(body, okMsg) {
       body: JSON.stringify(body),
     });
   } catch {
-    toast("Can't reach hq serve. Is it still running?", true);
+    toast("Lost contact with HQ. Is hq serve still running?", true);
     return false;
   }
   const out = await res.json().catch(() => ({ ok: false, error: `server error ${res.status}` }));
@@ -197,6 +197,10 @@ function plural(n, one, many = one + "s") {
 // ---- Today ------------------------------------------------------------------
 
 const SECTION_TONE = { due: "rose", planned: "violet", goals: "amber", top: "teal" };
+// HQ talks like a command post; the CLI keeps plain words.
+const SECTION_TITLE = { due: "Priority targets: overdue and due today", planned: "Today's operations",
+  goals: "Objectives closing this week", top: "Active missions", blocked: "Pinned down" };
+const hours = () => { const d = new Date(); return `${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")} hrs`; };
 
 function todayParts() {
   const sections = S.data.sections
@@ -230,7 +234,7 @@ function budgetCard(doing, blockedCount) {
   if (total > DAY_MINUTES) note += ", more than an 8-hour day";
   return `<section class="budget glass">
     <div class="budget-top">
-      <div><div class="budget-total">${total ? fmtMinutes(total) : "No time"} <span>estimated</span></div>
+      <div><div class="budget-total">${total ? fmtMinutes(total) : "No ops"} <span>${total ? "mission load" : "scheduled"}</span></div>
         <div class="budget-note">${note}</div></div>
       <div class="stats">${stats}</div>
     </div>
@@ -250,9 +254,9 @@ function freeCard() {
         <i class="dot ${esc(r.priority)}"></i><span class="mtitle">${esc(r.title)}</span><span class="kindtag">read</span><span class="mest">${esc(r.est_label)}</span></a>`
       : `<div class="mini item" data-project="${esc(r.project)}" data-slug="${esc(r.slug)}" data-t="${esc(searchText(r))}" data-open>
         <i class="dot ${esc(r.priority)}"></i><span class="mtitle">${esc(r.title)}</span><span class="mest">${esc(r.est_label)}</span></div>`).join("")
-    : `<p class="quiet">Nothing with an estimate fits in ${esc(fmtMinutes(minutes))}. Set estimates in a task's details.</p>`;
+    : `<p class="quiet">Nothing fits a ${esc(fmtMinutes(minutes))} window. Set estimates in a task's details.</p>`;
   return `<section class="side-card glass">
-    <h3>I've got time</h3>
+    <h3>Free window</h3>
     <form class="chips" data-form="free">${chips}
       <input name="minutes" type="number" min="5" step="5" placeholder="Other" value="${[15, 30, 60, 90].includes(minutes) ? "" : minutes}"
         class="${[15, 30, 60, 90].includes(minutes) ? "" : "on"}" aria-label="Other amount, in minutes" title="Other amount, in minutes"></form>
@@ -290,7 +294,7 @@ function blockedCard(blocked) {
 function scheduleCard() {
   const events = S.data.events.filter(inAreaItem);
   if (!events.length) return "";
-  return `<section class="side-card glass"><h3>Schedule<a class="more" href="/calendar" data-nav="calendar">Calendar</a></h3>
+  return `<section class="side-card glass"><h3>Today's schedule<a class="more" href="/calendar" data-nav="calendar">Calendar</a></h3>
     ${events.map((e) => `<div class="mini item event" data-day="${esc(S.data.today)}" data-t="${esc(e.title.toLowerCase())}" data-open>
       <span class="etime">${esc(e.when)}</span><span class="mtitle">${esc(e.title)}</span>${e.repeat ? `<span class="mest">${esc(e.repeat)}</span>` : ""}</div>`).join("")}
   </section>`;
@@ -299,7 +303,7 @@ function scheduleCard() {
 function readCard() {
   const unread = S.data.reading.filter((i) => i.status === "unread" && inAreaItem(i));
   if (!unread.length) return "";
-  return `<section class="side-card glass"><h3>Read next<span class="count">${unread.length}</span><a class="more" href="/reading" data-nav="reading">Reading list</a></h3>
+  return `<section class="side-card glass"><h3>Intel to review<span class="count">${unread.length}</span><a class="more" href="/reading" data-nav="reading">Reading list</a></h3>
     ${unread.slice(0, 3).map((i) => `<a class="mini item" href="${esc(safeUrl(i.url))}" target="_blank" rel="noopener noreferrer" data-t="${esc(searchText(i))}">
       <i class="dot ${esc(i.priority)}"></i><span class="mtitle">${esc(i.title)}</span><span class="mest">${esc(i.est_label || "")}</span></a>`).join("")}
   </section>`;
@@ -307,9 +311,9 @@ function readCard() {
 
 function wrapCard() {
   const inbox = S.data.inbox.filter(inAreaItem).length;
-  return `<section class="side-card glass wrap-card"><h3>End of day</h3>
-    <p class="quiet">${S.data.day_saved ? "Today is saved. Wrap up again to refresh it." : "Save a summary of today to your calendar."}</p>
-    <div class="wrap-actions"><button class="btn primary" data-act="day" data-date="${esc(S.data.today)}">${S.data.day_saved ? "Update today" : "Wrap up the day"}</button>
+  return `<section class="side-card glass wrap-card"><h3>Debrief</h3>
+    <p class="quiet">${S.data.day_saved ? "Debrief filed. File again to refresh it." : "File today's report before you stand down."}</p>
+    <div class="wrap-actions"><button class="btn primary" data-act="day" data-date="${esc(S.data.today)}">${S.data.day_saved ? "Update debrief" : "Debrief and stand down"}</button>
     ${inbox ? `<a class="btn" href="/inbox" data-nav="inbox">Inbox <span class="count">${inbox}</span></a>` : ""}</div>
   </section>`;
 }
@@ -319,19 +323,19 @@ function renderToday() {
   const { lists, blocked, doing } = todayParts();
   let listHtml = "";
   if (!lists.length) {
-    listHtml = `<div class="empty-state glass"><strong>Nothing due or planned today.</strong>
-      <p>Today fills itself from due dates, do-on dates, goal deadlines and active P1 and P2 work. Give a task a date or a priority, or add one.</p>
+    listHtml = `<div class="empty-state glass"><strong>All quiet on the front.</strong>
+      <p>Nothing due or planned. The briefing fills itself from due dates, do-on dates, goal deadlines and active P1 and P2 work. Give a task a date or a priority, or issue new orders.</p>
       <div class="empty-actions"><button class="btn primary" data-act="new-task">New task</button>
       <a class="btn" href="/board" data-nav="board">Open the board</a></div></div>`;
   }
   for (const s of lists) {
     listHtml += `<section class="section glass tone-${SECTION_TONE[s.key] || "violet"}" data-section="${esc(s.key)}">
-      <h2><i class="marker"></i>${esc(s.title)}<span class="count">${s.items.length}</span></h2>
+      <h2><i class="marker"></i>${esc(SECTION_TITLE[s.key] || s.title)}<span class="count">${s.items.length}</span></h2>
       ${s.items.map((r) => row(r, r.when)).join("")}</section>`;
   }
   return `<div class="page today">
     <header class="hero">
-      <div><div class="weekday">${esc(day.toLocaleDateString(undefined, { weekday: "long" }))}</div>
+      <div><div class="kicker"><i class="beacon"></i>Daily briefing<span class="sep">/</span>${esc(day.toLocaleDateString(undefined, { weekday: "long" }))}<span class="sep">/</span>${esc(hours())}</div>
         <h1 class="date">${esc(day.toLocaleDateString(undefined, { day: "numeric", month: "long" }))}</h1></div>
       <div class="headtools">${search("Search today")}</div>
     </header>
@@ -419,7 +423,7 @@ function renderGoals() {
   const active = goals.filter((g) => g.status === "active").sort((a, b) =>
     prioRank(a.priority) - prioRank(b.priority) || (a.target || "9999").localeCompare(b.target || "9999"));
   const closed = goals.filter((g) => g.status !== "active");
-  let html = `<div class="page">${head("Goals", "Goals group tasks across projects. Tasks in a goal due within a week show up on Today.",
+  let html = `<div class="page">${head("Goals", "Objectives that group tasks across projects. Tasks in a goal due within a week show up in the briefing.",
     `<button class="btn primary" data-act="new-goal">New goal</button>`)}`;
   if (!goals.length) {
     html += `<div class="empty-state glass"><strong>No goals yet.</strong>
@@ -459,7 +463,7 @@ function renderReading() {
   const unread = items.filter((i) => i.status === "unread");
   const done = items.filter((i) => i.status !== "unread").sort((a, b) => String(b.read_on).localeCompare(String(a.read_on)));
   const mins = unread.reduce((n, i) => n + (i.est || 0), 0);
-  const lede = unread.length ? `${plural(unread.length, "link")} to read${mins ? `, about ${fmtMinutes(mins)}` : ""}. The top three show on Today.` : "Save links here to read when you have a moment.";
+  const lede = unread.length ? `${plural(unread.length, "link")} to read${mins ? `, about ${fmtMinutes(mins)}` : ""}. The top three show on Today.` : "Intel to review. Save links here to read when you have a moment.";
   const prios = S.data.fields.priorities.map((p) => [p, p]);
   let html = `<div class="page">${head("Reading", lede)}
     <form class="capture glass" data-form="read-add">
@@ -470,7 +474,7 @@ function renderReading() {
     </form>`;
   html += unread.length
     ? `<section class="section glass tone-violet"><h2><i class="marker"></i>Unread<span class="count">${unread.length}</span></h2>${unread.map(readRow).join("")}</section>`
-    : `<div class="empty-state glass"><strong>Nothing to read.</strong><p>hq fetches each page's title and estimates how long it takes to read.</p></div>`;
+    : `<div class="empty-state glass"><strong>No intel waiting.</strong><p>HQ fetches each page's title and estimates how long it takes to read.</p></div>`;
   if (done.length) {
     html += `<details class="section glass closed-list"><summary><h2><i class="marker"></i>Read and dropped<span class="count">${done.length}</span><span class="toggle"></span></h2></summary>${done.map(readRow).join("")}</details>`;
   }
@@ -482,7 +486,7 @@ function renderReading() {
 function renderInbox() {
   const items = S.data.inbox.filter(inAreaItem);
   const areas = [["", "Any area"], ...S.data.fields.areas.map((a) => [a, a[0].toUpperCase() + a.slice(1)])];
-  let html = `<div class="page">${head("Inbox", "Capture now, sort later. Turn each item into a task, a goal or a link, or drop it.")}
+  let html = `<div class="page">${head("Inbox", "Field reports. Capture now, sort later: turn each one into a task, a goal or a link, or drop it.")}
     <form class="capture glass" data-form="dump">
       <input name="text" placeholder="What's on your mind?" required autocomplete="off" aria-label="Capture">
       ${selectCtl("area", areas, S.area, 'name="area" aria-label="Area"')}
@@ -746,7 +750,7 @@ function dayDrawer(d) {
       ${saved?.summary ? `<div class="md">${window.marked ? marked.parse(saved.summary) : esc(saved.summary)}</div>` : `<p class="quiet">Not saved yet. Wrapping up saves a summary built from the facts below; an agent can write a better one with <code>hq day end --summary-file</code>.</p>`}
       ${saved?.notes ? `<h3>My notes</h3><div class="md">${window.marked ? marked.parse(saved.notes) : esc(saved.notes)}</div>` : ""}
       <form class="notebox" data-form="day-end"><input name="summary" placeholder="${saved ? "Add a line to My notes (optional)" : "A line for My notes (optional)"}" autocomplete="off">
-        <button class="btn primary">${saved ? "Update the day" : "Wrap up the day"}</button></form>
+        <button class="btn primary">${saved ? "Update debrief" : "Debrief and stand down"}</button></form>
       <h3>Facts</h3><div class="md facts">${window.marked ? marked.parse(d.facts_md) : esc(d.facts_md)}</div>` : ""}
   </div>`;
 }
@@ -788,7 +792,7 @@ function openNewTask(goalDefault = "") {
   const last = localStorage.getItem("hq.project") || d.projects[0]?.name || "";
   const goals = d.goals.filter((g) => g.status === "active");
   dialog.innerHTML = `<form method="dialog" data-form="new-task">
-    <h2>New task</h2>
+    <h2>New orders</h2>
     <input class="titlein" name="title" placeholder="What needs doing?" required autocomplete="off">
     <div class="fields">
       <div class="field"><label>Project</label><input name="project" list="projlist" value="${esc(last)}" required></div>
@@ -802,7 +806,7 @@ function openNewTask(goalDefault = "") {
     </div>
     <datalist id="projlist">${d.projects.map((p) => `<option value="${esc(p.name)}">`).join("")}</datalist>
     <p class="err"></p>
-    <div class="foot"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="save">Save task</button></div>
+    <div class="foot"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="save">Issue orders</button></div>
   </form>`;
   dialog.showModal();
   dialog.querySelector("[name=title]").focus();
@@ -811,7 +815,7 @@ function openNewTask(goalDefault = "") {
 function openNewGoal() {
   const d = S.data;
   dialog.innerHTML = `<form method="dialog" data-form="new-goal">
-    <h2>New goal</h2>
+    <h2>New objective</h2>
     <input class="titlein" name="title" placeholder="What are you working towards?" required autocomplete="off">
     <div class="fields">
       <div class="field"><label>Area</label>${selectCtl("area", d.fields.areas.map((a) => [a, a[0].toUpperCase() + a.slice(1)]), S.area || "work", 'name="area"')}</div>
@@ -819,7 +823,7 @@ function openNewGoal() {
       <div class="field"><label>Target date</label><input type="date" name="target"></div>
     </div>
     <p class="err"></p>
-    <div class="foot"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="save">Create goal</button></div>
+    <div class="foot"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="save">Set objective</button></div>
   </form>`;
   dialog.showModal();
   dialog.querySelector("[name=title]").focus();
@@ -852,7 +856,7 @@ function openTriageTask(slug) {
   const last = localStorage.getItem("hq.project") || d.projects[0]?.name || "";
   const goals = d.goals.filter((g) => g.status === "active");
   dialog.innerHTML = `<form method="dialog" data-form="triage-task" data-ref="${esc(slug)}">
-    <h2>Make it a task</h2>
+    <h2>Turn into orders</h2>
     <p class="triage-text">${esc(item ? item.title : slug)}</p>
     <div class="fields">
       <div class="field"><label>Project</label><input name="project" list="projlist" value="${esc(last)}" required></div>
@@ -886,14 +890,14 @@ dialog.addEventListener("submit", async (ev) => {
   let ok;
   if (form.dataset.form === "new-task") {
     localStorage.setItem("hq.project", data.project);
-    ok = await cmd({ action: "save", ...data }, "Task saved");
+    ok = await cmd({ action: "save", ...data }, "Orders issued");
   } else if (form.dataset.form === "new-event") {
-    ok = await cmd(eventBody(data, data.date), "Event added");
+    ok = await cmd(eventBody(data, data.date), "On the schedule");
   } else if (form.dataset.form === "triage-task") {
     localStorage.setItem("hq.project", data.project);
-    ok = await cmd({ action: "triage", ref: form.dataset.ref, ...data }, "Moved to the board");
+    ok = await cmd({ action: "triage", ref: form.dataset.ref, ...data }, "Orders issued");
   } else {
-    ok = await cmd({ action: "goal_new", ...data }, "Goal created");
+    ok = await cmd({ action: "goal_new", ...data }, "Objective set");
   }
   if (ok) dialog.close();
   else err.textContent = toastEl.textContent;
@@ -910,14 +914,14 @@ function setFree(value) {
 
 async function doAction(what, ref, btn) {
   if (ref.reading) {
-    if (what === "read-done") return cmd({ action: "read_done", ref: ref.reading }, "Marked read");
+    if (what === "read-done") return cmd({ action: "read_done", ref: ref.reading }, "Intel reviewed");
     if (what === "read-drop") return cmd({ action: "read_drop", ref: ref.reading }, "Dropped from the list");
     return;
   }
   if (ref.inbox) {
     if (what === "triage-task") return openTriageTask(ref.inbox);
-    if (what === "triage-goal") return cmd({ action: "triage", ref: ref.inbox, to: "goal" }, "Made it a goal");
-    if (what === "triage-reading") return cmd({ action: "triage", ref: ref.inbox, to: "reading" }, "Saved to the reading list");
+    if (what === "triage-goal") return cmd({ action: "triage", ref: ref.inbox, to: "goal" }, "Objective set");
+    if (what === "triage-reading") return cmd({ action: "triage", ref: ref.inbox, to: "reading" }, "Filed as intel");
     if (what === "triage-drop") return cmd({ action: "triage", ref: ref.inbox, to: "drop" }, "Dropped");
     return;
   }
@@ -931,15 +935,15 @@ async function doAction(what, ref, btn) {
   }
   const base = ref.goal ? { goal: ref.goal } : { project: ref.project, slug: ref.slug };
   switch (what) {
-    case "start": return cmd({ action: "start", ...base }, "Started");
-    case "done": return cmd({ action: "archive", ...base }, "Marked done");
+    case "start": return cmd({ action: "start", ...base }, "Mission underway");
+    case "done": return cmd({ action: "archive", ...base }, "Mission accomplished");
     case "drop":
       if (!confirm("Drop this entry? It moves to the archive as dropped.")) return;
       return cmd({ action: "archive", dropped: true, ...base }, "Dropped");
-    case "unstart": return cmd({ action: "unstart", ...base }, "Moved back to planning");
-    case "unblock": return cmd({ action: "unblock", ...base }, "Unblocked");
-    case "tomorrow": return cmd({ action: "set", field: "do-on", value: "tomorrow", ...base }, "Planned for tomorrow");
-    case "goal-done": return cmd({ action: "goal_done", goal: ref.goal }, "Goal marked done");
+    case "unstart": return cmd({ action: "unstart", ...base }, "Pulled back to planning");
+    case "unblock": return cmd({ action: "unblock", ...base }, "Back in action");
+    case "tomorrow": return cmd({ action: "set", field: "do-on", value: "tomorrow", ...base }, "Scheduled for tomorrow");
+    case "goal-done": return cmd({ action: "goal_done", goal: ref.goal }, "Objective secured");
     case "goal-drop":
       if (!confirm("Drop this goal?")) return;
       return cmd({ action: "goal_done", goal: ref.goal, dropped: true }, "Goal dropped");
@@ -1015,14 +1019,14 @@ document.addEventListener("submit", (ev) => {
   const kind = form.dataset.form;
   if (kind === "free") return setFree(form.minutes.value);
   const data = Object.fromEntries(new FormData(form));
-  if (kind === "read-add") return cmd({ action: "read_add", ...data }, "Saved to the reading list");
-  if (kind === "dump") return cmd({ action: "dump", ...data }, "Captured");
+  if (kind === "read-add") return cmd({ action: "read_add", ...data }, "Filed as intel");
+  if (kind === "dump") return cmd({ action: "dump", ...data }, "Report logged");
   const ref = refOf(form);
-  if (ref?.day && kind === "day-end") return cmd({ action: "day_end", date: ref.day, summary: data.summary }, "Day saved");
-  if (ref?.day && kind === "event-add") return cmd(eventBody(data, ref.day), "Event added");
+  if (ref?.day && kind === "day-end") return cmd({ action: "day_end", date: ref.day, summary: data.summary }, "Debrief filed. At ease.");
+  if (ref?.day && kind === "event-add") return cmd(eventBody(data, ref.day), "On the schedule");
   if (!ref) return;
   const base = ref.goal ? { goal: ref.goal } : ref;
-  if (kind === "block") cmd({ action: "block", reason: form.reason.value, ...base }, "Blocked");
+  if (kind === "block") cmd({ action: "block", reason: form.reason.value, ...base }, "Pinned down. Reason logged.");
   if (kind === "note") cmd({ action: "note", text: form.text.value, ...base }, "Note added");
 });
 
@@ -1095,10 +1099,10 @@ refresh();
 // Archived cards can't be dragged: hq has no command to un-archive.
 
 const MOVES = {
-  "planning>active": { action: "start", msg: "Started" },
-  "active>planning": { action: "unstart", msg: "Moved back to planning" },
-  "planning>archive": { action: "archive", msg: "Marked done" },
-  "active>archive": { action: "archive", msg: "Marked done" },
+  "planning>active": { action: "start", msg: "Mission underway" },
+  "active>planning": { action: "unstart", msg: "Pulled back to planning" },
+  "planning>archive": { action: "archive", msg: "Mission accomplished" },
+  "active>archive": { action: "archive", msg: "Mission accomplished" },
 };
 const drag = { card: null, ghost: null, from: null, startX: 0, startY: 0, active: false, over: null, justDropped: false,
   touch: false, timer: 0 };
