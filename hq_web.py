@@ -32,7 +32,7 @@ from hq_core import HqError
 
 WEB_DIR = Path(__file__).with_name("web")
 STATIC = {"app.css": "text/css", "app.js": "text/javascript", "favicon.svg": "image/svg+xml"}
-PAGES = ("/", "/today", "/board", "/goals", "/reading", "/inbox", "/calendar")
+PAGES = ("/", "/today", "/board", "/goals", "/reading", "/inbox", "/calendar", "/timeline")
 MAX_BODY = 64 * 1024
 _WRITE_LOCK = threading.Lock()  # hq.main swaps sys.stdout; run one command at a time
 
@@ -341,6 +341,15 @@ class Handler(hq_serve.Handler):
                     return self._json(calendar(query.get("month"), query.get("week")))
                 if path == "/api/day":
                     return self._json(day(query.get("date")))
+                if path == "/api/activity":
+                    start = hq_day.parse_day(query.get("from"))
+                    end = hq_day.parse_day(query.get("to"))
+                    return self._json({"from": start.isoformat(), "to": end.isoformat(),
+                                       "events": hq_day.activity(start, end)})
+                if path == "/api/lanes":
+                    start, end = hq_day.parse_day(query.get("from")), hq_day.parse_day(query.get("to"))
+                    return self._json({"from": start.isoformat(), "to": end.isoformat(),
+                                       "lanes": hq_day.lanes(start, end)})
             except HqError as e:
                 return self._json({"ok": False, "error": str(e)}, 400)
             return self._json({"ok": False, "error": "not found"}, 404)

@@ -10,8 +10,8 @@ const dialog = document.getElementById("dialog");
 const toastEl = document.getElementById("toast");
 
 const PAGES = { "/": "today", "/today": "today", "/board": "board", "/goals": "goals",
-  "/reading": "reading", "/inbox": "inbox", "/calendar": "calendar" };
-const PATHS = { today: "/", board: "/board", goals: "/goals", reading: "/reading", inbox: "/inbox", calendar: "/calendar" };
+  "/reading": "reading", "/inbox": "inbox", "/calendar": "calendar", "/timeline": "timeline" };
+const PATHS = { today: "/", board: "/board", goals: "/goals", reading: "/reading", inbox: "/inbox", calendar: "/calendar", timeline: "/timeline" };
 const KINDS = ["task", "bug", "presentation"];
 const DAY_MINUTES = 480;
 
@@ -122,6 +122,7 @@ async function refresh() {
     const minutes = S.free?.minutes ?? (Number(localStorage.getItem("hq.free")) || 30);
     S.free = { minutes, items: (await getJSON(`/api/free?minutes=${minutes}`)).items };
     if (S.page === "calendar") await loadMonth(S.month);
+    if (S.page === "timeline") await loadTimeline();
   } catch (e) {
     toast(e.message, true);
     return;
@@ -638,12 +639,181 @@ function renderCalendar() {
     ${timelineCard(S.cal.timeline, week ? "week" : "month")}</div>`;
 }
 
+// ---- Timeline (activity feed and lanes, after 2b) ------------------------------
+
+S.tl = {
+  tab: "activity", range: "7d", month: null, from: null, to: null, project: "", day: "",
+  zoom: "month", laneMonth: null, act: null, lanes: null,
+};
+
+function tlRange() {
+  const t = S.tl, today = S.data.today;
+  if (t.range === "month") {
+    const m = t.month || today.slice(0, 7);
+    const [y, mo] = m.split("-").map(Number);
+    return { from: `${m}-01`, to: isoOf(new Date(y, mo, 0)) };
+  }
+  if (t.range === "custom") return { from: t.from || shiftDays(today, -6), to: t.to || today };
+  return { from: shiftDays(today, t.range === "30d" ? -29 : -6), to: today };
+}
+
+function laneRange() {
+  const m = S.tl.laneMonth || S.data.today.slice(0, 7);
+  const [y, mo] = m.split("-").map(Number);
+  return { from: `${m}-01`, to: isoOf(new Date(y, mo - 1 + (S.tl.zoom === "quarter" ? 3 : 1), 0)) };
+}
+
+async function loadTimeline() {
+  if (S.tl.tab === "lanes") {
+    const r = laneRange();
+    S.tl.lanes = await getJSON(`/api/lanes?from=${r.from}&to=${r.to}`);
+  } else {
+    const r = tlRange();
+    S.tl.act = await getJSON(`/api/activity?from=${r.from}&to=${r.to}`);
+  }
+}
+
+const tlInArea = (e) => !S.area || !e.area || e.area === S.area;
+
+function tlEvents(ignoreDay = false) {
+  return (S.tl.act?.events || []).filter((e) => tlInArea(e)
+    && (!S.tl.project || e.project === S.tl.project || e.group === S.tl.project)
+    && (ignoreDay || !S.tl.day || e.date === S.tl.day));
+}
+
+function weekStrip() {
+  const end = S.tl.act && S.tl.act.to < S.data.today ? S.tl.act.to : S.data.today;
+  const days = Array.from({ length: 7 }, (_, i) => shiftDays(end, i - 6));
+  const events = tlEvents(true);
+  const counts = days.map((d) => events.filter((e) => e.date === d).length);
+  const max = Math.max(1, ...counts);
+  return `<div class="weekstrip glass">${days.map((d, i) => {
+    const dues = S.data.entries.filter((r) => r.status !== "archive" && r.due === d && inArea(r)).length
+      + S.data.goals.filter((g) => g.status === "active" && g.target === d && inArea(g)).length;
+    const dt = parseISO(d);
+    return `<button type="button" class="wday${d === S.data.today ? " now" : ""}" data-tl="day" data-value="${S.tl.day === d ? "" : d}"
+      aria-pressed="${S.tl.day === d}" aria-label="${esc(dt.toLocaleDateString(undefined, { weekday: "long" }))}: ${counts[i]} actions, ${dues} due">
+      <span class="wd-name">${esc(dt.toLocaleDateString(undefined, { weekday: "short" }))}</span>
+      <span class="wd-num">${dt.getDate()}</span>
+      <span class="wd-track"><span style="width:${Math.round((counts[i] / max) * 100)}%"></span></span>
+      <span class="wd-due">${Array.from({ length: Math.min(4, dues) }, () => "<i></i>").join("")}</span>
+    </button>`;
+  }).join("")}</div>`;
+}
+
+const ACT_TONE = { start: "go", archive: "done", block: "stop", unblock: "go", note: "note", save: "new",
+  set: "edit", unstart: "edit", read: "read", dump: "new", triage: "edit", event: "cal", goal: "goal" };
+
+function actRow(e) {
+  const open = e.kind === "entry" ? `data-project="${esc(e.project)}" data-slug="${esc(e.slug)}" data-open`
+    : e.kind === "goal" ? `data-goal="${esc(e.goal)}" data-open` : "";
+  const title = e.kind === "reading" && e.url
+    ? `<a class="act-title" href="${esc(safeUrl(e.url))}" target="_blank" rel="noopener noreferrer">${esc(e.title)}</a>`
+    : `<span class="act-title">${esc(e.title)}</span>`;
+  const by = e.by && e.by !== "user" ? `<span class="by by-${esc(e.by)}">${esc(e.by)}</span>` : "";
+  return `<div class="act item${open ? " openable" : ""}" ${open} data-t="${esc(`${e.title} ${e.group} ${e.text}`.toLowerCase())}">
+    <time>${esc(e.time)}</time><i class="act-dot ${ACT_TONE[e.action] || "edit"}"></i>
+    <div class="act-copy">${title} <span class="act-what">${esc(e.text)}</span>
+      <div class="act-sub">${e.area ? `<span class="area ${esc(e.area)}">${esc(e.group)}</span>` : esc(e.group)}${by}</div></div>
+  </div>`;
+}
+
+function activityFeed() {
+  const events = tlEvents();
+  if (!events.length) {
+    return `<div class="empty-state glass"><strong>A quiet stretch.</strong><p>${S.tl.day || S.tl.project
+      ? "Nothing matches these filters." : "Actions show up here as you, your agents and the browser work. Pick a wider range to look back."}</p></div>`;
+  }
+  const days = [...new Set(events.map((e) => e.date))];
+  return days.map((d) => {
+    const mine = events.filter((e) => e.date === d);
+    const folds = new Map();
+    for (const e of mine) {
+      const k = `${e.group}|${e.action}`;
+      folds.set(k, [...(folds.get(k) || []), e]);
+    }
+    const done = new Set();
+    const rows = mine.map((e) => {
+      const k = `${e.group}|${e.action}`, all = folds.get(k);
+      if (all.length < 3) return actRow(e);
+      if (done.has(k)) return "";
+      done.add(k);
+      return `<details class="act-fold"><summary>${all.length} × ${esc(all[0].text.split(":")[0])} <span>in ${esc(e.group)}</span></summary>${all.map(actRow).join("")}</details>`;
+    }).join("");
+    const label = d === S.data.today ? "Today" : parseISO(d).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+    return `<section class="feed-day glass"><h2>${esc(label)}<span class="count">${mine.length}</span>
+      <button class="btn small quiet" data-act="day" data-date="${esc(d)}">Open day</button></h2>${rows}</section>`;
+  }).join("");
+}
+
+function lanesView() {
+  const L = S.tl.lanes;
+  if (!L) return `<p class="quiet">Loading...</p>`;
+  const from = L.from, to = L.to;
+  const span = Math.max(1, (parseISO(to) - parseISO(from)) / 86400000);
+  const pos = (d) => Math.max(0, Math.min(100, ((parseISO(d) - parseISO(from)) / 86400000 / span) * 100));
+  const lanes = L.lanes.filter((l) => !S.area || l.area === S.area);
+  const scale = Array.from({ length: 5 }, (_, i) => shortDate(shiftDays(from, Math.round((span * i) / 4))));
+  const nowPos = S.data.today >= from && S.data.today <= to ? pos(S.data.today) : null;
+  if (!lanes.length) return `<div class="empty-state glass"><strong>No lanes yet.</strong><p>Projects and goals appear from their first entry to their target or last activity.</p></div>`;
+  return `<div class="lanes glass">
+    <div class="lane lane-head"><span></span><div class="lane-scale">${scale.map((s) => `<span>${esc(s)}</span>`).join("")}</div></div>
+    ${lanes.map((l) => {
+      const inRange = l.start <= to && l.end >= from;
+      const left = pos(l.start), width = Math.max(0.6, pos(l.end) - left);
+      const open = l.kind === "goal" ? `data-goal="${esc(l.id)}" data-open` : "";
+      return `<div class="lane${l.closed ? " closed" : ""}">
+        <div class="lane-name ${open ? "openable" : ""}" ${open}><span class="area ${esc(l.area)}"></span>
+          <span class="lane-kind">${l.kind === "goal" ? "◎" : ""}</span>${esc(l.title)}</div>
+        <div class="lane-track" role="img" aria-label="${esc(l.title)}: ${esc(l.start)} to ${esc(l.end)}, ${l.days.length} active days">
+          ${nowPos !== null ? `<i class="lane-now" style="left:${nowPos}%"></i>` : ""}
+          ${inRange ? `<span class="lane-bar lb-${esc(l.kind)}" style="left:${left}%;width:${Math.min(width, 100 - left)}%" title="${esc(l.start)} to ${esc(l.end)}${l.target ? " (target)" : ""}"></span>` : ""}
+          ${l.days.map((d) => `<i class="lane-tick" style="left:${pos(d)}%" title="Active ${esc(d)}"></i>`).join("")}
+          ${l.target && l.target >= from && l.target <= to ? `<i class="lane-target" style="left:${pos(l.target)}%" title="Target ${esc(l.target)}"></i>` : ""}
+        </div></div>`;
+    }).join("")}
+  </div>`;
+}
+
+function renderTimeline() {
+  const t = S.tl;
+  const tabs = `<div class="viewswitch" role="tablist">
+    <button type="button" role="tab" data-tl="tab" data-value="activity" aria-pressed="${t.tab === "activity"}">Activity</button>
+    <button type="button" role="tab" data-tl="tab" data-value="lanes" aria-pressed="${t.tab === "lanes"}">Lanes</button></div>`;
+  let controls, body;
+  if (t.tab === "lanes") {
+    controls = `<div class="tl-controls"><div class="viewswitch">${[["month", "Month"], ["quarter", "Quarter"]].map(([v, l]) =>
+      `<button type="button" data-tl="zoom" data-value="${v}" aria-pressed="${t.zoom === v}">${l}</button>`).join("")}</div>
+      <input type="month" data-tlq="laneMonth" value="${esc(laneRange().from.slice(0, 7))}" aria-label="Starting month"></div>`;
+    body = lanesView();
+  } else {
+    const r = tlRange();
+    const projects = [...new Set((t.act?.events || []).map((e) => e.group))].sort();
+    controls = `<div class="tl-controls"><div class="viewswitch">${[["7d", "7 days"], ["30d", "30 days"], ["month", "Month"], ["custom", "Custom"]].map(([v, l]) =>
+      `<button type="button" data-tl="range" data-value="${v}" aria-pressed="${t.range === v}">${l}</button>`).join("")}</div>
+      ${t.range === "month" ? `<input type="month" data-tlq="month" value="${esc(r.from.slice(0, 7))}" aria-label="Month">` : ""}
+      ${t.range === "custom" ? `<input type="date" data-tlq="from" value="${esc(r.from)}" aria-label="From"><span class="quiet">to</span><input type="date" data-tlq="to" value="${esc(r.to)}" aria-label="To">` : ""}
+      <select data-tlq="project" aria-label="Goal or project"><option value="">All goals and projects</option>
+        ${projects.map((p) => `<option value="${esc(p)}"${p === t.project ? " selected" : ""}>${esc(p)}</option>`).join("")}</select>
+      ${t.day ? `<button type="button" class="btn small" data-tl="day" data-value="">${esc(shortDate(t.day))} ✕</button>` : ""}</div>`;
+    body = t.act ? weekStrip() + activityFeed() : `<p class="quiet">Loading...</p>`;
+  }
+  return `<div class="page">${head("Timeline", "Where the hours went: every action by you, your agents and the browser.", tabs)}${controls}${body}</div>`;
+}
+
+function tlSet(key, value) {
+  S.tl[key] = value;
+  const reload = ["tab", "range", "month", "from", "to", "zoom", "laneMonth"].includes(key);
+  if (key === "range" || key === "tab") S.tl.day = "";
+  return reload ? loadTimeline().then(render).catch((e) => toast(e.message, true)) : render();
+}
+
 // ---- render + search ----------------------------------------------------------
 
 function render() {
   if (!S.data) return;
   const html = { today: renderToday, board: renderBoard, goals: renderGoals, reading: renderReading,
-    inbox: renderInbox, calendar: renderCalendar }[S.page]();
+    inbox: renderInbox, calendar: renderCalendar, timeline: renderTimeline }[S.page]();
   main.innerHTML = html;
   $$(".navlink").forEach((a) => (a.dataset.nav === S.page
     ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
@@ -691,6 +861,7 @@ function go(page) {
   if (!PATHS[page]) return;
   S.page = page;
   if (page === "calendar") loadMonth(S.month).then(render).catch((e) => toast(e.message, true));
+  if (page === "timeline") loadTimeline().then(render).catch((e) => toast(e.message, true));
   S.sel = -1;
   if (location.pathname !== PATHS[page]) history.pushState(null, "", PATHS[page]);
   render();
@@ -1091,6 +1262,8 @@ document.addEventListener("click", (ev) => {
   }
   const chip = t.closest("[data-free]");
   if (chip) return setFree(chip.dataset.free);
+  const tl = t.closest("[data-tl]");
+  if (tl) return tlSet(tl.dataset.tl, tl.dataset.value);
   const calview = t.closest("[data-calview]");
   if (calview) {
     S.calView = calview.dataset.calview;
@@ -1137,6 +1310,7 @@ scrim.addEventListener("click", closeDrawer);
 
 document.addEventListener("change", (ev) => {
   const el = ev.target;
+  if (el.dataset.tlq) return tlSet(el.dataset.tlq, el.value);
   if (!el.dataset.set || dialog.contains(el)) return;
   const ref = refOf(el);
   if (!ref) return;
@@ -1197,6 +1371,7 @@ document.addEventListener("keydown", (ev) => {
     r: () => { closeDrawer(); go("reading"); },
     i: () => { closeDrawer(); go("inbox"); },
     c: () => { closeDrawer(); go("calendar"); },
+    l: () => { closeDrawer(); go("timeline"); },
     j: () => select(S.sel + 1),
     k: () => select(Math.max(0, S.sel - 1)),
     e: () => openSelected(),
@@ -1215,6 +1390,7 @@ addEventListener("popstate", () => {
   S.page = PAGES[location.pathname] || "today";
   closeDrawer();
   if (S.page === "calendar") return loadMonth(S.month).then(render);
+  if (S.page === "timeline") return loadTimeline().then(render);
   render();
 });
 

@@ -466,3 +466,110 @@ def first_line(summary: str | None) -> str:
         if line:
             return re.sub(r"\*\*(.+?)\*\*", r"\1", line)
     return ""
+
+
+# ---- activity feed and lanes (the Timeline page) ------------------------------
+
+MAX_RANGE_DAYS = 400
+
+
+def check_range(start: datetime.date, end: datetime.date) -> None:
+    if start > end:
+        raise HqError("the end date must be on or after the start date")
+    if (end - start).days >= MAX_RANGE_DAYS:
+        raise HqError(f"choose a range of {MAX_RANGE_DAYS} days or less")
+
+
+def activity(start: datetime.date, end: datetime.date) -> list[dict]:
+    """Every logged action from start to end inclusive, newest first, labelled
+    with its item, area and goal/project so the browser can group and filter."""
+    check_range(start, end)
+    ctx = _Context()
+    out = []
+    for when, e in _lines_between(start, end):
+        a = e.get("action")
+        if a == "day-end":
+            continue
+        row = {"at": when.strftime("%Y-%m-%dT%H:%M"), "date": when.date().isoformat(),
+               "time": when.strftime("%H:%M"), "action": a, "text": _describe(e), "by": e.get("by"),
+               "project": None, "slug": None, "goal": None, "area": None}
+        if a == "read":
+            item = ctx.reading.get(e.get("slug"))
+            row.update(kind="reading", group="Reading", title=item["title"] if item else e.get("slug"),
+                       area=item["area"] if item else None, url=item["url"] if item else None)
+        elif a in ("dump", "triage"):
+            row.update(kind="inbox", group="Inbox", title=e.get("text") or e.get("target") or e.get("slug"))
+        elif a == "event":
+            row.update(kind="event", group="Calendar", title=e.get("title") or e.get("id"))
+        else:
+            area, group, title, ref = ctx.place(e)
+            if group is None:
+                row.update(kind="other", group="Other", title=a)
+            elif ref and ref.startswith("goal/"):
+                row.update(kind="goal", group=group, title=title if title != "(the goal itself)" else group[6:],
+                           goal=ref[5:], area=area)
+            else:
+                row.update(kind="entry", group=group, title=title, area=area,
+                           project=e.get("project"), slug=e.get("slug"))
+        out.append(row)
+    out.sort(key=lambda r: r["at"], reverse=True)
+    return out
+
+
+def lanes(start: datetime.date, end: datetime.date) -> list[dict]:
+    """One lane per project and per goal: from its first entry (or creation)
+    to its target, or else its last activity, with the days it saw activity
+    inside start..end."""
+    check_range(start, end)
+    records = hq_ops.entry_records()
+    goals = hq_registry.list_goals()
+    try:
+        registry = hq_registry.load_projects()
+    except HqError:
+        registry = {}
+    by_ref = {(r["project"], r["slug"]): r for r in records}
+    last: dict[str, str] = {}
+    days: dict[str, set] = {}
+    for e in hq_core.read_log():
+        when = _local(e.get("ts", ""))
+        if not when:
+            continue
+        d = when.date().isoformat()
+        keys = []
+        if e.get("project"):
+            keys.append("p:" + e["project"])
+        goal = e.get("goal") or (e.get("slug") if e.get("action") == "goal" else None)
+        if goal:
+            keys.append("g:" + goal)
+        rec = by_ref.get((e.get("project"), e.get("slug")))
+        if rec and rec["goal"]:
+            keys.append("g:" + rec["goal"])
+        for k in keys:
+            last[k] = max(last.get(k, d), d)
+            if start.isoformat() <= d <= end.isoformat():
+                days.setdefault(k, set()).add(d)
+    out = []
+    for project in sorted({r["project"] for r in records}):
+        mine = [r for r in records if r["project"] == project]
+        created = min((str(r["created"]) for r in mine if r["created"]), default=None)
+        k = "p:" + project
+        first = created or last.get(k)
+        if not first:
+            continue
+        out.append({"kind": "project", "id": project, "title": project,
+                    "area": hq_registry.project_area(project, registry),
+                    "start": first[:10], "end": max(last.get(k, first[:10]), first[:10]), "target": None,
+                    "open": sum(r["status"] != "archive" for r in mine),
+                    "closed": all(r["status"] == "archive" for r in mine),
+                    "days": sorted(days.get(k, ()))})
+    for g in goals:
+        k = "g:" + g["slug"]
+        first = str(g["created"] or last.get(k) or "")[:10]
+        if not first:
+            continue
+        end_day = g["target"] or last.get(k, first)
+        out.append({"kind": "goal", "id": g["slug"], "title": g["title"], "area": g["area"],
+                    "start": first, "end": max(end_day, first), "target": g["target"],
+                    "open": None, "closed": g["status"] != "active", "days": sorted(days.get(k, ()))})
+    out.sort(key=lambda l: (l["closed"], l["kind"] != "goal", -len(l["days"]), l["title"]))
+    return out

@@ -245,6 +245,35 @@ class CalendarViewTests(ServerCase):
         _, state = self.get_json("/api/state")
         self.assertEqual(state["reading"][0]["est"], 25)
 
+    @staticmethod
+    def days(n):
+        import datetime
+        return (datetime.date.today() + datetime.timedelta(days=n)).isoformat()
+
+    def test_timeline_activity_and_lanes(self):
+        status, _ = self.request("GET", "/timeline")
+        self.assertEqual(status, 200)
+        self.post({"action": "start", "project": "p", "slug": "write-docs"})
+        self.post({"action": "dump", "text": "an idea"})
+        _, act = self.get_json(f"/api/activity?from={self.days(-6)}&to=today")
+        kinds = {(e["kind"], e["action"]) for e in act["events"]}
+        self.assertIn(("entry", "start"), kinds)
+        self.assertIn(("inbox", "dump"), kinds)
+        self.assertIn(("goal", "goal"), kinds)
+        start = next(e for e in act["events"] if e["action"] == "start")
+        self.assertEqual((start["project"], start["slug"], start["by"], start["title"]), ("p", "write-docs", "web", "Write docs"))
+        self.assertEqual(act["events"], sorted(act["events"], key=lambda e: e["at"], reverse=True))
+        _, lanes = self.get_json(f"/api/lanes?from={self.days(-30)}&to={self.days(30)}")
+        by = {(l["kind"], l["id"]): l for l in lanes["lanes"]}
+        self.assertIn(("project", "p"), by)
+        self.assertIn(("goal", "ship-it"), by)
+        self.assertTrue(by[("project", "p")]["days"])
+        self.assertIsNotNone(by[("goal", "ship-it")]["target"])
+        status, out = self.get_json(f"/api/activity?from=today&to={self.days(-3)}")
+        self.assertEqual(status, 400)
+        status, out = self.get_json("/api/lanes?from=2020-01-01&to=2026-01-01")
+        self.assertIn("400 days", out["error"])
+
     def test_theme_switch_is_in_the_page(self):
         _, raw = self.request("GET", "/")
         self.assertIn(b'data-act="theme"', raw)

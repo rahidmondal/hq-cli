@@ -249,12 +249,18 @@ In advanced mode `hq serve` opens the v2 app instead (the v1 board is still at
   day to see its summary, your notes and the facts, add or remove events, or
   wrap the day up. On a phone it becomes a list of the days that have
   something on them.
+- **Timeline** shows where the hours went. *Activity* is every action by
+  you, your agents and the browser, newest first and grouped by day (7 or 30
+  days, a month, or a custom range; filter by goal or project; a week strip
+  shows each day's activity and due dates; repeated actions fold together).
+  *Lanes* draws each project and goal from its first entry to its target or
+  last activity, with a tick for every active day (a month or a quarter).
 - **Reading** saves links (hq fetches the title and length) and marks them
   read or dropped. **Inbox** captures thoughts and turns each one into a
   task, a goal or a link, or drops it.
 - **Light, dark or system theme**: the switch is at the bottom of the sidebar.
-- Filter by area (All / Work / Personal). Keys: `t` `b` `g` `c` `r` `i` switch
-  pages, `n` new task, `/` search, `j` `k` move, `e` open, `Esc` close.
+- Filter by area (All / Work / Personal). Keys: `t` `b` `g` `c` `l` `r` `i`
+  switch pages, `n` new task, `/` search, `j` `k` move, `e` open, `Esc` close.
 
 Every change runs the same command you'd type (`hq --by web ...`), so the
 checks and the log match the terminal. The page still only listens on
