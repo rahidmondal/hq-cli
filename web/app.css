@@ -72,6 +72,8 @@ kbd, .key {
 .areas button + button { border-left: 1px solid var(--line); }
 .areas button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; }
 .keys-help { margin-top: auto; font-size: .74rem; color: var(--muted); line-height: 1.9; }
+.railfoot { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
+.version { font-size: .74rem; color: var(--faint); font-variant-numeric: tabular-nums; }
 .classic-link { font-size: .78rem; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
 main { padding: 2rem clamp(1rem, 4vw, 3.5rem) 5rem; outline: none; min-width: 0; }
 .page { max-width: 980px; }
@@ -263,7 +265,7 @@ dialog .err { color: var(--p1); font-size: .85rem; min-height: 1.2em; margin: .5
     justify-content: space-around; align-items: center; padding: .35rem .5rem calc(.35rem + env(safe-area-inset-bottom));
     border-right: 0; border-top: 1px solid var(--line); background: var(--surface);
   }
-  .brand, .areas, .keys-help, .classic-link, .key { display: none; }
+  .brand, .areas, .keys-help, .railfoot, .key { display: none; }
   .navlink { padding: .45rem .7rem; }
   .navlink[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--accent); }
   .newbtn { margin: 0; padding: .45rem .8rem; }

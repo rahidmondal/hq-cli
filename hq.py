@@ -329,6 +329,7 @@ def cmd_check(args):
 
 def build_parser():
     parser = argparse.ArgumentParser(prog="hq")
+    parser.add_argument("--version", action="version", version=f"hq {hq_core.VERSION}")
     parser.add_argument("--by", choices=hq_core.ACTORS, help="who is acting (advanced mode; default $HQ_ACTOR or user)")
     sub = parser.add_subparsers(dest="command", required=True)
 

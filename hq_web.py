@@ -189,7 +189,7 @@ def _clean_error(err: str) -> str:
 
 def app_page(token: str) -> str:
     shell = (WEB_DIR / "index.html").read_text(encoding="utf-8")
-    return shell.replace("__TOKEN__", token)
+    return shell.replace("__TOKEN__", token).replace("__VERSION__", hq_core.VERSION)
 
 
 class Handler(hq_serve.Handler):

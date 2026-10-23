@@ -64,6 +64,8 @@ class ReadTests(ServerCase):
         status, raw = self.request("GET", "/")
         self.assertEqual(status, 200)
         self.assertIn(self.token, raw.decode())
+        self.assertIn(f"v{hq_core.VERSION}", raw.decode())
+        self.assertNotIn("__VERSION__", raw.decode())
         for path in ("/_app/app.js", "/_app/app.css", "/board", "/goals", "/classic"):
             self.assertEqual(self.request("GET", path)[0], 200, path)
 
@@ -150,6 +152,13 @@ class WriteTests(ServerCase):
         self.assertEqual(status, 415)
         self.assertEqual(self.post(body, {"Origin": f"http://localhost:{self.port}"})[0], 200)
         self.assertEqual(sum(l["action"] == "start" for l in self.log()), 1)
+
+
+class VersionTests(TempRoot):
+    def test_cli_version_flag(self):
+        code, out, err = run_cli(["--version"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), f"hq {hq_core.VERSION}")
 
 
 class ClassicServeTests(TempRoot):
